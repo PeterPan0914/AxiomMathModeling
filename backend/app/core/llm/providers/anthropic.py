@@ -46,6 +46,9 @@ class AnthropicProvider(BaseProvider):
         for block in response.content:
             if block.type == "text":
                 content_parts.append(block.text)
+            elif block.type == "thinking":
+                # 记录 thinking 内容（部分模型如 mimo-v2.5-pro 会返回）
+                content_parts.append(f"[thinking]{block.thinking}[/thinking]")
             elif block.type == "tool_use":
                 tool_calls.append(ToolCall(
                     id=block.id,

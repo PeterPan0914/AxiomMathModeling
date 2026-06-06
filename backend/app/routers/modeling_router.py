@@ -69,41 +69,24 @@ async def save_api_config(request: SaveApiConfigRequest):
     """
     try:
         # 更新各个模块的设置
-        if request.coordinator:
-            settings.COORDINATOR_API_KEY = request.coordinator.get("apiKey", "")
-            settings.COORDINATOR_MODEL = request.coordinator.get("modelId", "")
-            settings.COORDINATOR_BASE_URL = request.coordinator.get("baseUrl", "")
-            if api_type := request.coordinator.get("apiType"):
-                settings.COORDINATOR_API_TYPE = api_type
-            if cw := request.coordinator.get("contextWindow"):
-                settings.COORDINATOR_CONTEXT_WINDOW = int(cw)
+        def _update_agent_config(prefix: str, config: dict):
+            """更新单个 agent 的配置，保持模型名为小写（API 要求）。"""
+            if not config:
+                return
+            setattr(settings, f"{prefix}_API_KEY", config.get("apiKey", ""))
+            # 模型名强制小写，避免 API 返回 "Not supported model MiMo-V2.5-Pro"
+            model_id = config.get("modelId", "")
+            setattr(settings, f"{prefix}_MODEL", model_id.lower() if model_id else "")
+            setattr(settings, f"{prefix}_BASE_URL", config.get("baseUrl", ""))
+            if api_type := config.get("apiType"):
+                setattr(settings, f"{prefix}_API_TYPE", api_type)
+            if cw := config.get("contextWindow"):
+                setattr(settings, f"{prefix}_CONTEXT_WINDOW", int(cw))
 
-        if request.modeler:
-            settings.MODELER_API_KEY = request.modeler.get("apiKey", "")
-            settings.MODELER_MODEL = request.modeler.get("modelId", "")
-            settings.MODELER_BASE_URL = request.modeler.get("baseUrl", "")
-            if api_type := request.modeler.get("apiType"):
-                settings.MODELER_API_TYPE = api_type
-            if cw := request.modeler.get("contextWindow"):
-                settings.MODELER_CONTEXT_WINDOW = int(cw)
-
-        if request.coder:
-            settings.CODER_API_KEY = request.coder.get("apiKey", "")
-            settings.CODER_MODEL = request.coder.get("modelId", "")
-            settings.CODER_BASE_URL = request.coder.get("baseUrl", "")
-            if api_type := request.coder.get("apiType"):
-                settings.CODER_API_TYPE = api_type
-            if cw := request.coder.get("contextWindow"):
-                settings.CODER_CONTEXT_WINDOW = int(cw)
-
-        if request.writer:
-            settings.WRITER_API_KEY = request.writer.get("apiKey", "")
-            settings.WRITER_MODEL = request.writer.get("modelId", "")
-            settings.WRITER_BASE_URL = request.writer.get("baseUrl", "")
-            if api_type := request.writer.get("apiType"):
-                settings.WRITER_API_TYPE = api_type
-            if cw := request.writer.get("contextWindow"):
-                settings.WRITER_CONTEXT_WINDOW = int(cw)
+        _update_agent_config("COORDINATOR", request.coordinator)
+        _update_agent_config("MODELER", request.modeler)
+        _update_agent_config("CODER", request.coder)
+        _update_agent_config("WRITER", request.writer)
 
         if request.openalex_email:
             settings.OPENALEX_EMAIL = request.openalex_email
