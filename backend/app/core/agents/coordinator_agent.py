@@ -64,7 +64,8 @@ class CoordinatorAgent(Agent):
                         response_reasoning=response.reasoning_content,
                     )
 
-                # 清理 JSON 字符串
+                # 清理 JSON 字符串：剥离 thinking 块、markdown 标记和控制字符
+                json_str = re.sub(r"\[thinking\].*?\[/thinking\]", "", json_str, flags=re.DOTALL)
                 json_str = json_str.replace("```json", "").replace("```", "").strip()
                 json_str = re.sub(r"[\x00-\x1F\x7F]", "", json_str)
 

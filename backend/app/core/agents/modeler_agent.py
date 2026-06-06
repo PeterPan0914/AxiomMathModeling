@@ -23,6 +23,8 @@ def repair_json(json_str: str) -> dict | None:
     Returns:
         修复后的字典，无法修复时返回 None。
     """
+    # 剥离 thinking 块（thinking 模型如 mimo-v2.5-pro 会返回）
+    json_str = re.sub(r"\[thinking\].*?\[/thinking\]", "", json_str, flags=re.DOTALL)
     json_str = json_str.replace("```json", "").replace("```", "").strip()
 
     # Try direct parse first
