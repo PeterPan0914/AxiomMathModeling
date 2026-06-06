@@ -5,42 +5,49 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "aiofile>=3.9.0",
-    "aioredis>=2.0.1",
-    "ansi2html>=1.9.2",
-    "anthropic>=0.40.0",
-    "celery>=5.4.0",
-    "chromadb>=0.4.0",
-    "e2b-code-interpreter>=1.0.5",
+    # ---- 核心框架 ----
     "fastapi[standard]>=0.115.8",
-    "httpx[socks]>=0.28.1",
-    "icecream>=2.1.4",
-    "ipykernel>=6.29.5",
-    "jupyter-client>=8.6.3",
-    "loguru>=0.7.3",
-    "matplotlib>=3.10.1",
-    "nbformat>=5.10.4",
-    "numpy>=2.2.5",
-    "openai>=1.65.4",
-    "openpyxl>=3.1.5",
-    "pandas>=2.2.3",
+    "uvicorn[standard]>=0.34.0",
     "pydantic>=2.10.6",
     "pydantic-settings>=2.8.0",
-    "pymupdf>=1.24.0",
-    "pypandoc-binary>=1.15",
-    "rank-bm25>=0.2.2",
+    "loguru>=0.7.3",
+
+    # ---- LLM 客户端 ----
+    "anthropic>=0.40.0",
+    "openai>=1.65.4",
+
+    # ---- 网络/通信 ----
+    "httpx[socks]>=0.28.1",
     "redis>=5.2.1",
     "requests>=2.32.0",
-    "scikit-learn>=1.6.1",
-    "scipy>=1.15.2",
+    "aiofile>=3.9.0",
+
+    # ---- Jupyter 代码执行 ----
+    "jupyter-client>=8.6.3",
+    "ipykernel>=6.29.5",
+    "nbformat>=5.10.4",
+    "ansi2html>=1.9.2",
+
+    # ---- Jupyter 内核依赖（CoderAgent 生成的代码需要） ----
+    "numpy>=2.2.5",
+    "pandas>=2.2.3",
+    "matplotlib>=3.10.1",
     "seaborn>=0.13.2",
-    "semanticscholar>=0.10.0",
-    "sentence-transformers>=2.2.0",
-    "shap>=0.51.0",
+    "scipy>=1.15.2",
+    "scikit-learn>=1.6.1",
     "statsmodels>=0.14.4",
-    "uvicorn[standard]>=0.34.0",
-    "websocket>=0.2.1",
     "xgboost>=3.0.0",
+    "shap>=0.51.0",
+    "openpyxl>=3.1.5",
+
+    # ---- 文档转换 ----
+    "pypandoc-binary>=1.15",
+
+    # ---- 可选：E2B 云端沙箱 ----
+    "e2b-code-interpreter>=1.0.5",
+
+    # ---- 调试工具（可移至 dev 组） ----
+    "icecream>=2.1.4",
 ]
 
 [dependency-groups]
