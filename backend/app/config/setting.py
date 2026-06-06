@@ -99,6 +99,19 @@ class Settings(BaseSettings):
         "paper_review": True,
     }
 
+    # Reflexion 配置
+    REFLEXION_ENABLED: bool = True  # 是否启用 Reflexion 循环
+    REFLEXION_MAX_ITERATIONS: int = 3  # 最大迭代次数
+    REFLEXION_QUALITY_THRESHOLD: int = 80  # 质量达标阈值（0-100）
+
+    # 评审 Agent 配置
+    REVIEWER_API_TYPE: Optional[ApiType] = None
+    REVIEWER_API_KEY: Optional[str] = None
+    REVIEWER_MODEL: Optional[str] = None
+    REVIEWER_BASE_URL: Optional[str] = None
+    REVIEWER_MAX_TOKENS: Optional[int] = None
+    REVIEWER_CONTEXT_WINDOW: int = 128000
+
     model_config = SettingsConfigDict(
         env_file=".env.dev",
         env_file_encoding="utf-8",

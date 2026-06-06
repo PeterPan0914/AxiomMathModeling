@@ -15,9 +15,14 @@ from app.tools.notebook_serializer import NotebookSerializer
 from app.core.flows import Flows
 from app.core.llm.llm_factory import LLMFactory
 
-# Reflexion 配置
-REFLEXION_MAX_ITERATIONS = 3  # 最大迭代次数
-REFLEXION_QUALITY_THRESHOLD = 80  # 质量达标阈值
+# Reflexion 配置（从 settings 读取）
+def _get_reflexion_config():
+    """获取 Reflexion 配置。"""
+    return {
+        'max_iterations': settings.REFLEXION_MAX_ITERATIONS,
+        'quality_threshold': settings.REFLEXION_QUALITY_THRESHOLD,
+        'enabled': settings.REFLEXION_ENABLED,
+    }
 
 
 class WorkFlow:
@@ -262,10 +267,19 @@ class MathModelWorkFlow(WorkFlow):
         """
         from app.schemas.A2A import WriterResponse
 
+        reflexion_config = _get_reflexion_config()
+
+        # 如果 Reflexion 未启用，直接生成
+        if not reflexion_config['enabled']:
+            return await writer_agent.run(prompt=prompt, sub_title=sub_title)
+
+        max_iterations = reflexion_config['max_iterations']
+        quality_threshold = reflexion_config['quality_threshold']
+
         current_response = None
         feedback = ""
 
-        for iteration in range(REFLEXION_MAX_ITERATIONS):
+        for iteration in range(max_iterations):
             await self._check_cancelled()
 
             # 1. 生成论文
@@ -309,7 +323,7 @@ class MathModelWorkFlow(WorkFlow):
             )
 
             # 3. 检查质量是否达标
-            if review_result.overall_score >= REFLEXION_QUALITY_THRESHOLD:
+            if review_result.overall_score >= quality_threshold:
                 await redis_manager.publish_message(
                     self.task_id,
                     SystemMessage(
