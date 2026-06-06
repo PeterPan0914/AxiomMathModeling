@@ -65,7 +65,10 @@ class ReviewAgent(Agent):
         )
 
         response_content = response.content or ""
-        await self.append_chat_history({"role": "assistant", "content": response_content})
+        assistant_msg: dict = {"role": "assistant", "content": response_content}
+        if response.reasoning_content:
+            assistant_msg["reasoning_content"] = response.reasoning_content
+        await self.append_chat_history(assistant_msg)
 
         # 解析评审结果
         review_result = self._parse_review_response(response_content)

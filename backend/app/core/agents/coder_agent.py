@@ -230,6 +230,16 @@ class CoderAgent(Agent):
 
                             # 成功执行后继续循环，等待下一步指令
                             continue
+                    else:
+                        # 未预期的工具名称，记录错误并让 LLM 重试
+                        logger.warning(f"未预期的工具名称: {tool_call.name}")
+                        await self.append_chat_history(
+                            {"role": "assistant", "content": response.content or ""}
+                        )
+                        await self.append_chat_history(
+                            {"role": "user", "content": f"你调用了不存在的工具 '{tool_call.name}'，请只使用 execute_code 工具。"}
+                        )
+                        continue
                 else:
                     # 没有工具调用，表示任务完成
                     logger.info("没有工具调用，任务完成")

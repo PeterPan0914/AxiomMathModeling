@@ -67,7 +67,7 @@ class UserOutput:
     def get_model_build_solve(self) -> str:
         """获取模型求解结果的摘要字符串。"""
         model_build_solve = ",".join(
-            f"{key}-{value}"
+            f"{key}-{value.get('response_content', '')}"
             for key, value in self.res.items()
             if key.startswith("ques") and key != "ques_count"
         )

@@ -12,7 +12,6 @@ from app.schemas.A2A import CoordinatorToModeler, ModelerToCoder
 from app.utils.log_util import logger
 import json
 import re
-from icecream import ic  # type: ignore[import-unresolved]
 
 
 def repair_json(json_str: str) -> dict | None:
@@ -116,7 +115,7 @@ class ModelerAgent(Agent):
 
             questions_solution = repair_json(json_str)
             if questions_solution:
-                ic(questions_solution)
+                logger.info(f"建模方案解析成功: {list(questions_solution.keys())}")
                 return ModelerToCoder(questions_solution=questions_solution)
 
             attempt += 1

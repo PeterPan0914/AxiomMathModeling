@@ -97,7 +97,7 @@ class Agent:
                 sub_title=sub_title,
             )
 
-            response_content = response.content
+            response_content = response.content or ""
             assistant_msg: dict = {"role": "assistant", "content": response_content}
             if response.reasoning_content:
                 assistant_msg["reasoning_content"] = response.reasoning_content

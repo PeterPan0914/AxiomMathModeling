@@ -175,9 +175,14 @@ class WriterAgent(Agent):
                     sub_title=sub_title,
                 )
                 response_content = next_response.content or ""
+                final_reasoning = next_response.reasoning_content
         else:
             response_content = response.content or ""
-        self.chat_history.append({"role": "assistant", "content": response_content, "reasoning_content": response.reasoning_content} if response.reasoning_content else {"role": "assistant", "content": response_content})
+            final_reasoning = response.reasoning_content
+        assistant_msg: dict = {"role": "assistant", "content": response_content}
+        if final_reasoning:
+            assistant_msg["reasoning_content"] = final_reasoning
+        await self.append_chat_history(assistant_msg)
         logger.info(f"{self.__class__.__name__}:完成:执行对话")
         return WriterResponse(response_content=response_content, footnotes=footnotes)
 

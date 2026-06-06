@@ -2,7 +2,7 @@
 
 import asyncio
 from app.core.agents import WriterAgent, CoderAgent, CoordinatorAgent, ModelerAgent, ReviewAgent
-from app.core.evaluation import QualityScore, QualityReport, quality_tracker
+from app.core.evaluation import QualityScore, QualityReport, QualityTracker
 from app.schemas.request import Problem
 from app.schemas.response import SystemMessage
 from app.tools.openalex_scholar import OpenAlexScholar
@@ -66,8 +66,9 @@ class MathModelWorkFlow(WorkFlow):
         self.task_id = problem.task_id
         self.work_dir = create_work_dir(self.task_id)
 
-        # 初始化诊断日志
+        # 初始化诊断日志和质量跟踪器（实例级别，避免多任务污染）
         diag = DiagnosticLogger(self.work_dir)
+        quality_tracker = QualityTracker()
         diag.save_workflow_config({
             "task_id": self.task_id,
             "comp_template": problem.comp_template.value if hasattr(problem.comp_template, 'value') else str(problem.comp_template),
@@ -163,7 +164,7 @@ class MathModelWorkFlow(WorkFlow):
             SystemMessage(content="初始化代码手"),
         )
 
-        # modeler_agent
+        # 初始化代码手、写作手、评审手
         coder_agent = CoderAgent(
             task_id=problem.task_id,
             model=coder_llm,
@@ -278,23 +279,46 @@ class MathModelWorkFlow(WorkFlow):
         write_flows = flows.get_write_flows(
             user_output, config_template, problem.ques_all
         )
+        failed_write_sections = []
         for key, value in write_flows.items():
             await self._check_cancelled()
 
+            try:
+                await redis_manager.publish_message(
+                    self.task_id,
+                    SystemMessage(content=f"论文手开始写{key}部分"),
+                )
+
+                # Reflexion 循环：生成 -> 评审 -> 改进
+                writer_response = await self._writing_with_reflexion(
+                    writer_agent=writer_agent,
+                    review_agent=review_agent,
+                    prompt=value,
+                    sub_title=key,
+                    quality_tracker=quality_tracker,
+                )
+
+                user_output.set_res(key, writer_response)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                error_msg = f"写作子任务 {key} 执行失败: {str(e)}"
+                logger.error(error_msg)
+                failed_write_sections.append(key)
+                await redis_manager.publish_message(
+                    self.task_id,
+                    SystemMessage(content=error_msg, type="error"),
+                )
+                continue
+
+        if failed_write_sections:
             await redis_manager.publish_message(
                 self.task_id,
-                SystemMessage(content=f"论文手开始写{key}部分"),
+                SystemMessage(
+                    content=f"警告: {len(failed_write_sections)} 个写作任务失败: {', '.join(failed_write_sections)}",
+                    type="warning"
+                ),
             )
-
-            # Reflexion 循环：生成 -> 评审 -> 改进
-            writer_response = await self._writing_with_reflexion(
-                writer_agent=writer_agent,
-                review_agent=review_agent,
-                prompt=value,
-                sub_title=key,
-            )
-
-            user_output.set_res(key, writer_response)
 
         logger.info(user_output.get_res())
 
@@ -312,6 +336,7 @@ class MathModelWorkFlow(WorkFlow):
         review_agent: ReviewAgent,
         prompt: str,
         sub_title: str,
+        quality_tracker: QualityTracker | None = None,
     ) -> 'WriterResponse':
         """带 Reflexion 循环的写作流程。
 
@@ -398,7 +423,8 @@ class MathModelWorkFlow(WorkFlow):
                 feedback=review_result.feedback,
                 iteration=iteration + 1,
             )
-            quality_tracker.add_report(quality_report)
+            if quality_tracker:
+                quality_tracker.add_report(quality_report)
 
             # 4. 检查质量是否达标
             if review_result.overall_score >= quality_threshold:
