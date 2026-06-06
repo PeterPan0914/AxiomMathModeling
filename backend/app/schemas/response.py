@@ -106,6 +106,11 @@ class WriterMessage(AgentMessage):
     sub_title: str | None = None
 
 
+class ReviewerMessage(AgentMessage):
+    agent_type: AgentType = AgentType.REVIEWER
+    sub_title: str | None = None
+
+
 class ApprovalMessage(Message):
     """HIL 审批消息，发送到前端触发审批对话框。"""
 
@@ -136,4 +141,5 @@ MessageType = Union[
     WriterMessage,
     ModelerMessage,
     CoordinatorMessage,
+    ReviewerMessage,
 ]

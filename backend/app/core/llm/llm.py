@@ -7,6 +7,7 @@ import time
 from app.schemas.response import (
     CoderMessage,
     WriterMessage,
+    ReviewerMessage,
     ModelerMessage,
     SystemMessage,
     CoordinatorMessage,
@@ -98,8 +99,16 @@ class LLM:
                 return response
             except Exception as e:
                 attempt += 1
-                logger.error(f"第{attempt}次重试: {str(e)}")
-                if max_retries is not None and attempt >= max_retries:
+                error_str = str(e)
+                # 不可恢复的错误（400 参数错误、模型不支持等），立即抛出不重试
+                if "400" in error_str or "Not supported model" in error_str:
+                    logger.error(f"不可恢复的错误，停止重试: {error_str}")
+                    raise
+                logger.error(f"第{attempt}次重试: {error_str}")
+                # 限制最大重试次数，防止无限循环
+                effective_max = max_retries if max_retries is not None else 10
+                if attempt >= effective_max:
+                    logger.error(f"达到最大重试次数 {effective_max}，放弃")
                     raise
                 time.sleep(retry_delay * min(attempt, 10))
 
@@ -178,6 +187,8 @@ class LLM:
                 content, _ = split_footnotes(content)
                 content = transform_link(self.task_id, content)
                 agent_msg = WriterMessage(content=content, sub_title=sub_title)
+            case AgentType.REVIEWER:
+                agent_msg = ReviewerMessage(content=content, sub_title=sub_title)
             case AgentType.MODELER:
                 agent_msg = ModelerMessage(content=content)
             case AgentType.SYSTEM:
@@ -185,7 +196,8 @@ class LLM:
             case AgentType.COORDINATOR:
                 agent_msg = CoordinatorMessage(content=content)
             case _:
-                raise ValueError(f"不支持的agent类型: {agent_name}")
+                logger.warning(f"未知的agent类型: {agent_name}，跳过消息发送")
+                return
 
         await redis_manager.publish_message(self.task_id, agent_msg)
 
