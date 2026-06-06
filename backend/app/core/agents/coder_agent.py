@@ -241,14 +241,58 @@ class CoderAgent(Agent):
                         )
                         continue
                 else:
-                    # 没有工具调用，表示任务完成
-                    logger.info("没有工具调用，任务完成")
-                    return CoderToWriter(
-                        code_response=response.content,
-                        created_images=await self.code_interpreter.get_created_images(
-                            subtask_title
-                        ),
-                    )
+                    # 没有工具调用，但可能 LLM 把代码作为文本返回了（部分模型不支持 tool_use）
+                    # 尝试从 content 中提取代码块并执行
+                    content = response.content or ""
+                    import re
+                    code_blocks = re.findall(r"```python\s*\n(.*?)```", content, re.DOTALL)
+
+                    if code_blocks:
+                        # 提取到代码块，逐个执行
+                        logger.info(f"LLM 未调用工具，但从文本中提取到 {len(code_blocks)} 个代码块，自动执行")
+                        for i, code in enumerate(code_blocks):
+                            code = code.strip()
+                            if not code:
+                                continue
+                            logger.info(f"执行提取的代码块 {i+1}/{len(code_blocks)}")
+                            text_to_gpt, error_occurred, error_message = await self.code_interpreter.execute_code(code)
+
+                            if self.diagnostic_logger:
+                                self.diagnostic_logger.log_tool_result(
+                                    agent_name=self.__class__.__name__,
+                                    tool_name="execute_code (extracted)",
+                                    sub_title=subtask_title,
+                                    tool_input={"code": code},
+                                    tool_output=error_message if error_occurred else text_to_gpt,
+                                    is_error=error_occurred,
+                                )
+
+                            if error_occurred:
+                                logger.warning(f"提取的代码块执行失败: {error_message}")
+                                # 执行失败时，将错误反馈给 LLM 重试
+                                await self.append_chat_history({"role": "assistant", "content": content})
+                                reflection_prompt = get_reflection_prompt(error_message, code)
+                                await self.append_chat_history({"role": "user", "content": reflection_prompt})
+                                retry_count += 1
+                                break  # 跳出代码块循环，进入下一轮对话
+                        else:
+                            # 所有代码块执行成功，继续对话让 LLM 决定是否还需要执行更多代码
+                            await self.append_chat_history({"role": "assistant", "content": content})
+                            await self.append_chat_history({
+                                "role": "user",
+                                "content": "代码已执行完成。如果还需要继续分析或执行更多代码，请继续；如果任务已完成，请说明结果。"
+                            })
+                            continue
+                        continue
+                    else:
+                        # 没有代码块，认为任务完成
+                        logger.info("没有工具调用也没有代码块，任务完成")
+                        return CoderToWriter(
+                            code_response=response.content,
+                            created_images=await self.code_interpreter.get_created_images(
+                                subtask_title
+                            ),
+                        )
                     
             except Exception as e:
                 logger.error(f"执行过程中发生异常: {str(e)}")
