@@ -1,9 +1,0 @@
-services:
-  redis:
-    container_name: mathmodelagent_jihe520_redis
-
-  backend:
-    container_name: mathmodelagent_jihe520_backend
-
-  frontend:
-    container_name: mathmodelagent_jihe520_frontend
