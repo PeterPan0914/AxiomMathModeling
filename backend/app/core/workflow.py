@@ -2,6 +2,7 @@
 
 import asyncio
 from app.core.agents import WriterAgent, CoderAgent, CoordinatorAgent, ModelerAgent, ReviewAgent
+from app.core.evaluation import QualityScore, QualityReport, quality_tracker
 from app.schemas.request import Problem
 from app.schemas.response import SystemMessage
 from app.tools.openalex_scholar import OpenAlexScholar
@@ -322,7 +323,24 @@ class MathModelWorkFlow(WorkFlow):
                 sub_title=f"评审 {sub_title}",
             )
 
-            # 3. 检查质量是否达标
+            # 3. 记录质量报告
+            quality_score = QualityScore(
+                math_score=review_result.math_score,
+                logic_score=review_result.logic_score,
+                language_score=review_result.language_score,
+                format_score=review_result.format_score,
+            )
+            quality_report = QualityReport(
+                section_name=sub_title,
+                score=quality_score,
+                strengths=review_result.strengths,
+                improvements=review_result.improvements,
+                feedback=review_result.feedback,
+                iteration=iteration + 1,
+            )
+            quality_tracker.add_report(quality_report)
+
+            # 4. 检查质量是否达标
             if review_result.overall_score >= quality_threshold:
                 await redis_manager.publish_message(
                     self.task_id,
@@ -333,7 +351,7 @@ class MathModelWorkFlow(WorkFlow):
                 )
                 break
 
-            # 4. 生成反馈
+            # 5. 生成反馈
             feedback = self._generate_reflexion_feedback(review_result)
 
             await redis_manager.publish_message(
@@ -414,5 +432,8 @@ class MathModelWorkFlow(WorkFlow):
             user_output.set_res(key, writer_response)
 
         logger.info(user_output.get_res())
+
+        # 打印质量跟踪摘要
+        quality_tracker.print_summary()
 
         user_output.save_result()
