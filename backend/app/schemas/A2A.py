@@ -26,3 +26,15 @@ class WriterResponse(BaseModel):
     """写作手的响应数据结构。"""
     response_content: Any
     footnotes: list[tuple[str, str]] | None = None
+
+
+class ReviewResponse(BaseModel):
+    """评审 Agent 的响应数据结构。"""
+    overall_score: int = 0
+    math_score: int = 0
+    logic_score: int = 0
+    language_score: int = 0
+    format_score: int = 0
+    feedback: str = ""
+    improvements: list[str] = []
+    strengths: list[str] = []

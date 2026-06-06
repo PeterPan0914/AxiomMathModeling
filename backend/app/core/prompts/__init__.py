@@ -2,6 +2,7 @@ from app.core.prompts.coordinator import COORDINATOR_PROMPT, FORMAT_QUESTIONS_PR
 from app.core.prompts.modeler import MODELER_PROMPT
 from app.core.prompts.coder import CODER_PROMPT
 from app.core.prompts.writer import get_writer_prompt
+from app.core.prompts.reviewer import get_reviewer_prompt
 from app.core.prompts.shared import get_reflection_prompt, get_completion_check_prompt
 
 __all__ = [
@@ -10,6 +11,7 @@ __all__ = [
     "MODELER_PROMPT",
     "CODER_PROMPT",
     "get_writer_prompt",
+    "get_reviewer_prompt",
     "get_reflection_prompt",
     "get_completion_check_prompt",
 ]
