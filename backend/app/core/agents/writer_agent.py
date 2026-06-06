@@ -1,8 +1,12 @@
 """写作手 Agent 模块，负责基于建模结果撰写学术论文。"""
 
 import asyncio
+from typing import TYPE_CHECKING
 from app.core.agents.agent import Agent
 from app.core.llm.llm import LLM
+
+if TYPE_CHECKING:
+    from app.utils.diagnostic_logger import DiagnosticLogger
 from app.core.prompts import get_writer_prompt
 from app.schemas.enums import CompTemplate, FormatOutPut
 from app.config.setting import ApiType
@@ -31,8 +35,9 @@ class WriterAgent(Agent):
         scholar: OpenAlexScholar | None = None,
         context_window: int = 128000,
         cancel_event: asyncio.Event | None = None,
+        diagnostic_logger: 'DiagnosticLogger | None' = None,
     ) -> None:
-        super().__init__(task_id, model, context_window, cancel_event=cancel_event)
+        super().__init__(task_id, model, context_window, cancel_event=cancel_event, diagnostic_logger=diagnostic_logger)
         self.format_out_put = format_output
         self.comp_template = comp_template
         self.scholar = scholar
@@ -143,6 +148,17 @@ class WriterAgent(Agent):
                 assert self.scholar is not None, "scholar 未初始化"
                 papers_str = self.scholar.papers_to_str(papers)
                 logger.info(f"搜索文献结果\n{papers_str}")
+
+                # 记录诊断日志
+                if self.diagnostic_logger:
+                    self.diagnostic_logger.log_tool_result(
+                        agent_name=self.__class__.__name__,
+                        tool_name="search_papers",
+                        sub_title=sub_title or "unknown",
+                        tool_input={"query": query},
+                        tool_output=papers_str,
+                    )
+
                 await self.append_chat_history(
                     {
                         "role": "tool",

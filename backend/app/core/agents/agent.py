@@ -1,9 +1,12 @@
 """Agent 基类模块，提供对话管理和记忆压缩功能。"""
 
 import asyncio
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from app.core.llm.llm import LLM, simple_chat
 from app.utils.log_util import logger
+
+if TYPE_CHECKING:
+    from app.utils.diagnostic_logger import DiagnosticLogger
 
 # TODO: 评估任务完成情况，rethinking
 
@@ -23,6 +26,7 @@ class Agent:
         context_window: int = 128000,  # 模型上下文窗口大小（token）
         token_threshold_ratio: float = _DEFAULT_TOKEN_THRESHOLD_RATIO,
         cancel_event: asyncio.Event | None = None,
+        diagnostic_logger: 'DiagnosticLogger | None' = None,
     ) -> None:
         self.task_id = task_id
         self.model = model
@@ -31,6 +35,7 @@ class Agent:
         self.token_threshold_ratio = token_threshold_ratio
         self.current_token_count = 0  # 当前历史的估算 token 数
         self.cancel_event = cancel_event  # 取消信号
+        self.diagnostic_logger = diagnostic_logger
 
     def _estimate_tokens(self, text: str) -> int:
         """估算文本的 token 数量。"""
@@ -113,6 +118,27 @@ class Agent:
             else:
                 self.current_token_count += self._estimate_message_tokens(
                     {"content": response_content}
+                )
+
+            # 记录诊断日志：完整的 prompt 和 response
+            if self.diagnostic_logger:
+                usage_dict = None
+                if response.usage:
+                    usage_dict = {
+                        "prompt_tokens": response.usage.prompt_tokens,
+                        "completion_tokens": response.usage.completion_tokens,
+                    }
+                self.diagnostic_logger.log_interaction(
+                    agent_name=self.__class__.__name__,
+                    sub_title=sub_title,
+                    messages=self.chat_history[:-1],  # 排除刚添加的 assistant 消息
+                    response_content=response_content,
+                    response_reasoning=response.reasoning_content,
+                    tool_calls=[
+                        {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
+                        for tc in response.tool_calls
+                    ] if response.tool_calls else None,
+                    usage=usage_dict,
                 )
 
             logger.info(f"{self.__class__.__name__}:完成:执行对话")

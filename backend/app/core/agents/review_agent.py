@@ -1,8 +1,13 @@
 """评审 Agent 模块，负责对论文进行多维度质量评审。"""
 
 import asyncio
+import json
+from typing import TYPE_CHECKING
 from app.core.agents.agent import Agent
 from app.core.llm.llm import LLM
+
+if TYPE_CHECKING:
+    from app.utils.diagnostic_logger import DiagnosticLogger
 from app.core.prompts import get_reviewer_prompt
 from app.schemas.enums import FormatOutPut
 from app.utils.log_util import logger
@@ -18,8 +23,9 @@ class ReviewAgent(Agent):
         model: LLM,
         context_window: int = 128000,
         cancel_event: asyncio.Event | None = None,
+        diagnostic_logger: 'DiagnosticLogger | None' = None,
     ) -> None:
-        super().__init__(task_id, model, context_window, cancel_event=cancel_event)
+        super().__init__(task_id, model, context_window, cancel_event=cancel_event, diagnostic_logger=diagnostic_logger)
         self.system_prompt = get_reviewer_prompt()
         self.is_first_run = True
 
@@ -67,6 +73,16 @@ class ReviewAgent(Agent):
         logger.info(
             f"ReviewAgent: 评审完成 - 总分: {review_result['overall_score']}/100"
         )
+
+        # 记录诊断日志：结构化评审数据
+        if self.diagnostic_logger:
+            self.diagnostic_logger.log_tool_result(
+                agent_name=self.__class__.__name__,
+                tool_name="review_evaluation",
+                sub_title=section_name or "unknown",
+                tool_input={"paper_content_length": len(paper_content)},
+                tool_output=json.dumps(review_result, ensure_ascii=False),
+            )
 
         return ReviewResponse(
             overall_score=review_result["overall_score"],

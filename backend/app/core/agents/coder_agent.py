@@ -1,9 +1,13 @@
 """代码手 Agent 模块，负责生成和执行 Python 代码完成建模任务。"""
 
 import asyncio
+from typing import TYPE_CHECKING
 from app.core.agents.agent import Agent
 from app.config.setting import settings, ApiType
 from app.utils.log_util import logger
+
+if TYPE_CHECKING:
+    from app.utils.diagnostic_logger import DiagnosticLogger
 from app.services.redis_manager import redis_manager
 from app.schemas.response import SystemMessage, InterpreterMessage
 from app.tools.base_interpreter import BaseCodeInterpreter
@@ -32,8 +36,9 @@ class CoderAgent(Agent):
         code_interpreter: BaseCodeInterpreter | None = None,
         context_window: int = 128000,
         cancel_event: asyncio.Event | None = None,
+        diagnostic_logger: 'DiagnosticLogger | None' = None,
     ) -> None:
-        super().__init__(task_id, model, context_window, cancel_event=cancel_event)
+        super().__init__(task_id, model, context_window, cancel_event=cancel_event, diagnostic_logger=diagnostic_logger)
         self.work_dir = work_dir
         self.max_chat_turns = max_chat_turns
         self.current_chat_turns = 0
@@ -175,6 +180,17 @@ class CoderAgent(Agent):
                                 }
                             )
 
+                            # 记录诊断日志
+                            if self.diagnostic_logger:
+                                self.diagnostic_logger.log_tool_result(
+                                    agent_name=self.__class__.__name__,
+                                    tool_name="execute_code",
+                                    sub_title=subtask_title,
+                                    tool_input={"code": code},
+                                    tool_output=error_message,
+                                    is_error=True,
+                                )
+
                             logger.warning(f"代码执行错误: {error_message}")
                             retry_count += 1
                             logger.info(f"当前尝试次:{retry_count} / {self.max_retries}")
@@ -200,6 +216,18 @@ class CoderAgent(Agent):
                                     "content": text_to_gpt,
                                 }
                             )
+
+                            # 记录诊断日志
+                            if self.diagnostic_logger:
+                                self.diagnostic_logger.log_tool_result(
+                                    agent_name=self.__class__.__name__,
+                                    tool_name="execute_code",
+                                    sub_title=subtask_title,
+                                    tool_input={"code": code},
+                                    tool_output=text_to_gpt,
+                                    is_error=False,
+                                )
+
                             # 成功执行后继续循环，等待下一步指令
                             continue
                 else:

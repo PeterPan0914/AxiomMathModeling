@@ -1,9 +1,13 @@
 """建模手 Agent 模块，负责分析问题并制定建模方案。"""
 
 import asyncio
+from typing import TYPE_CHECKING
 from app.core.agents.agent import Agent
 from app.core.llm.llm import LLM
 from app.core.prompts import MODELER_PROMPT
+
+if TYPE_CHECKING:
+    from app.utils.diagnostic_logger import DiagnosticLogger
 from app.schemas.A2A import CoordinatorToModeler, ModelerToCoder
 from app.utils.log_util import logger
 import json
@@ -61,8 +65,9 @@ class ModelerAgent(Agent):
         context_window: int = 128000,
         max_retries: int = 5,
         cancel_event: asyncio.Event | None = None,
+        diagnostic_logger: 'DiagnosticLogger | None' = None,
     ) -> None:
-        super().__init__(task_id, model, context_window, cancel_event=cancel_event)
+        super().__init__(task_id, model, context_window, cancel_event=cancel_event, diagnostic_logger=diagnostic_logger)
         self.system_prompt = MODELER_PROMPT
         self.max_retries = max_retries
 
@@ -96,6 +101,16 @@ class ModelerAgent(Agent):
             )
 
             json_str = response.content
+
+            # 记录诊断日志
+            if self.diagnostic_logger:
+                self.diagnostic_logger.log_interaction(
+                    agent_name=self.__class__.__name__,
+                    sub_title="建模方案",
+                    messages=self.chat_history,
+                    response_content=json_str,
+                    response_reasoning=response.reasoning_content,
+                )
             if not json_str:
                 raise ValueError("返回的 JSON 字符串为空，请检查输入内容。")
 

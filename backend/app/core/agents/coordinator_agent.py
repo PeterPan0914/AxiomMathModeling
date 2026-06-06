@@ -1,9 +1,13 @@
 """协调者 Agent 模块，负责识别用户意图并拆解数学建模问题。"""
 
 import asyncio
+from typing import TYPE_CHECKING
 from app.core.agents.agent import Agent
 from app.core.llm.llm import LLM
 from app.core.prompts import COORDINATOR_PROMPT
+
+if TYPE_CHECKING:
+    from app.utils.diagnostic_logger import DiagnosticLogger
 import json
 import re
 from app.utils.log_util import logger
@@ -19,8 +23,9 @@ class CoordinatorAgent(Agent):
         context_window: int = 128000,
         max_retries: int = 5,
         cancel_event: asyncio.Event | None = None,
+        diagnostic_logger: 'DiagnosticLogger | None' = None,
     ) -> None:
-        super().__init__(task_id, model, context_window, cancel_event=cancel_event)
+        super().__init__(task_id, model, context_window, cancel_event=cancel_event, diagnostic_logger=diagnostic_logger)
         self.system_prompt = COORDINATOR_PROMPT
         self.max_retries = max_retries
 
@@ -48,6 +53,16 @@ class CoordinatorAgent(Agent):
                     agent_name=self.__class__.__name__,
                 )
                 json_str = response.content or ""
+
+                # 记录诊断日志
+                if self.diagnostic_logger:
+                    self.diagnostic_logger.log_interaction(
+                        agent_name=self.__class__.__name__,
+                        sub_title="问题拆解",
+                        messages=self.chat_history,
+                        response_content=json_str,
+                        response_reasoning=response.reasoning_content,
+                    )
 
                 # 清理 JSON 字符串
                 json_str = json_str.replace("```json", "").replace("```", "").strip()

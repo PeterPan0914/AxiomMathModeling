@@ -8,6 +8,7 @@ from app.schemas.response import SystemMessage
 from app.tools.openalex_scholar import OpenAlexScholar
 from app.utils.log_util import logger
 from app.utils.common_utils import create_work_dir, get_config_template
+from app.utils.diagnostic_logger import DiagnosticLogger
 from app.models.user_output import UserOutput
 from app.config.setting import settings
 from app.tools.interpreter_factory import create_interpreter
@@ -65,6 +66,23 @@ class MathModelWorkFlow(WorkFlow):
         self.task_id = problem.task_id
         self.work_dir = create_work_dir(self.task_id)
 
+        # 初始化诊断日志
+        diag = DiagnosticLogger(self.work_dir)
+        diag.save_workflow_config({
+            "task_id": self.task_id,
+            "comp_template": problem.comp_template.value if hasattr(problem.comp_template, 'value') else str(problem.comp_template),
+            "format_output": problem.format_output.value if hasattr(problem.format_output, 'value') else str(problem.format_output),
+            "reflexion_enabled": settings.REFLEXION_ENABLED,
+            "reflexion_max_iterations": settings.REFLEXION_MAX_ITERATIONS,
+            "reflexion_quality_threshold": settings.REFLEXION_QUALITY_THRESHOLD,
+            "models": {
+                "coordinator": settings.COORDINATOR_MODEL,
+                "modeler": settings.MODELER_MODEL,
+                "coder": settings.CODER_MODEL,
+                "writer": settings.WRITER_MODEL,
+            },
+        })
+
         llm_factory = LLMFactory(self.task_id)
         coordinator_llm, modeler_llm, coder_llm, writer_llm = llm_factory.get_all_llms()
 
@@ -72,6 +90,7 @@ class MathModelWorkFlow(WorkFlow):
             self.task_id, coordinator_llm,
             context_window=settings.COORDINATOR_CONTEXT_WINDOW,
             cancel_event=self.cancel_event,
+            diagnostic_logger=diag,
         )
 
         await redis_manager.publish_message(
@@ -106,6 +125,7 @@ class MathModelWorkFlow(WorkFlow):
             self.task_id, modeler_llm,
             context_window=settings.MODELER_CONTEXT_WINDOW,
             cancel_event=self.cancel_event,
+            diagnostic_logger=diag,
         )
 
         modeler_response = await modeler_agent.run(coordinator_response)
@@ -153,6 +173,7 @@ class MathModelWorkFlow(WorkFlow):
             code_interpreter=code_interpreter,
             context_window=settings.CODER_CONTEXT_WINDOW,
             cancel_event=self.cancel_event,
+            diagnostic_logger=diag,
         )
 
         writer_agent = WriterAgent(
@@ -163,6 +184,7 @@ class MathModelWorkFlow(WorkFlow):
             scholar=scholar,
             context_window=settings.WRITER_CONTEXT_WINDOW,
             cancel_event=self.cancel_event,
+            diagnostic_logger=diag,
         )
 
         # 初始化评审 Agent（用于 Reflexion 循环）
@@ -171,6 +193,7 @@ class MathModelWorkFlow(WorkFlow):
             model=writer_llm,  # 使用同一个 LLM
             context_window=settings.WRITER_CONTEXT_WINDOW,
             cancel_event=self.cancel_event,
+            diagnostic_logger=diag,
         )
 
         flows = Flows(self.questions)
@@ -245,6 +268,43 @@ class MathModelWorkFlow(WorkFlow):
                     type="warning"
                 ),
             )
+
+        # 关闭沙盒
+        await code_interpreter.cleanup()
+        logger.info(user_output.get_res())
+
+        ################################################ write steps with Reflexion
+
+        write_flows = flows.get_write_flows(
+            user_output, config_template, problem.ques_all
+        )
+        for key, value in write_flows.items():
+            await self._check_cancelled()
+
+            await redis_manager.publish_message(
+                self.task_id,
+                SystemMessage(content=f"论文手开始写{key}部分"),
+            )
+
+            # Reflexion 循环：生成 -> 评审 -> 改进
+            writer_response = await self._writing_with_reflexion(
+                writer_agent=writer_agent,
+                review_agent=review_agent,
+                prompt=value,
+                sub_title=key,
+            )
+
+            user_output.set_res(key, writer_response)
+
+        logger.info(user_output.get_res())
+
+        # 打印质量跟踪摘要
+        quality_tracker.print_summary()
+
+        # 保存诊断数据
+        diag.save_quality_data(quality_tracker.get_summary())
+
+        user_output.save_result()
 
     async def _writing_with_reflexion(
         self,
@@ -402,38 +462,3 @@ class MathModelWorkFlow(WorkFlow):
             feedback_parts.append("")
 
         return "\n".join(feedback_parts)
-
-        # 关闭沙盒
-
-        await code_interpreter.cleanup()
-        logger.info(user_output.get_res())
-
-        ################################################ write steps with Reflexion
-
-        write_flows = flows.get_write_flows(
-            user_output, config_template, problem.ques_all
-        )
-        for key, value in write_flows.items():
-            await self._check_cancelled()
-
-            await redis_manager.publish_message(
-                self.task_id,
-                SystemMessage(content=f"论文手开始写{key}部分"),
-            )
-
-            # Reflexion 循环：生成 -> 评审 -> 改进
-            writer_response = await self._writing_with_reflexion(
-                writer_agent=writer_agent,
-                review_agent=review_agent,
-                prompt=value,
-                sub_title=key,
-            )
-
-            user_output.set_res(key, writer_response)
-
-        logger.info(user_output.get_res())
-
-        # 打印质量跟踪摘要
-        quality_tracker.print_summary()
-
-        user_output.save_result()

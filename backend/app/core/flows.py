@@ -90,12 +90,106 @@ class Flows:
         """
         model_build_solve = user_output.get_model_build_solve()
         flows = {
-            "firstPage": f"""问题背景{bg_ques_all},不需要编写代码,根据模型的求解的信息{model_build_solve}，按照如下模板撰写：{config_template["firstPage"]}，撰写标题，摘要，关键词""",
-            "RepeatQues": f"""问题背景{bg_ques_all},不需要编写代码,根据模型的求解的信息{model_build_solve}，按照如下模板撰写：{config_template["RepeatQues"]}，撰写问题重述""",
-            "analysisQues": f"""问题背景{bg_ques_all},不需要编写代码,根据模型的求解的信息{model_build_solve}，按照如下模板撰写：{config_template["analysisQues"]}，撰写问题分析""",
-            "modelAssumption": f"""问题背景{bg_ques_all},不需要编写代码,根据模型的求解的信息{model_build_solve}，按照如下模板撰写：{config_template["modelAssumption"]}，撰写模型假设""",
-            "symbol": f"""不需要编写代码,根据模型的求解的信息{model_build_solve}，按照如下模板撰写：{config_template["symbol"]}，撰写符号说明部分""",
-            "judge": f"""不需要编写代码,根据模型的求解的信息{model_build_solve}，按照如下模板撰写：{config_template["judge"]}，撰写模型的评价部分""",
+            "firstPage": f"""【任务】撰写论文的标题、摘要和关键词。
+
+【问题背景】
+{bg_ques_all}
+
+【模型求解信息】
+{model_build_solve}
+
+【写作要求】
+1. 标题：简洁明了，15-25字，体现核心方法和研究对象
+2. 摘要：
+   - 第一段：背景与整体方法（1-2句）
+   - 中间段落：每个问题单独成段，必须包含具体方法和数值结果
+   - 最后一段：敏感性分析与结论
+   - 总字数400-600字
+3. 关键词：4-5个，用空格分隔
+
+【模板参考】
+{config_template["firstPage"]}
+""",
+            "RepeatQues": f"""【任务】撰写论文的问题重述章节。
+
+【问题背景】
+{bg_ques_all}
+
+【模型求解信息】
+{model_build_solve}
+
+【写作要求】
+1. 问题背景（1.1）：一段话，150-200字，说明研究背景和实际意义
+2. 问题重述（1.2）：以"本文基于以上信息建立数学模型来解决以下问题"开头，逐条列出
+
+【模板参考】
+{config_template["RepeatQues"]}
+""",
+            "analysisQues": f"""【任务】撰写论文的问题分析章节。
+
+【问题背景】
+{bg_ques_all}
+
+【模型求解信息】
+{model_build_solve}
+
+【写作要求】
+1. 每个问题用"## 2.X 问题X的分析"标题
+2. 每个问题约200-300字，分两段：
+   - 第一段：问题本质（类型、难点、约束）
+   - 第二段：解题思路（模型选择、核心思想、预期结果）
+3. 使用"针对问题X"开头
+4. 必须说明模型选择理由
+
+【模板参考】
+{config_template["analysisQues"]}
+""",
+            "modelAssumption": f"""【任务】撰写论文的模型假设章节。
+
+【问题背景】
+{bg_ques_all}
+
+【模型求解信息】
+{model_build_solve}
+
+【写作要求】
+1. 写3-5条假设
+2. 每条用编号格式：(1) 假设名称：假设内容。
+3. 假设类型：数据有效性、环境稳定性、参数确定性、独立性等
+4. 简明扼要，每条1-2句话
+
+【模板参考】
+{config_template["modelAssumption"]}
+""",
+            "symbol": f"""【任务】撰写论文的符号说明章节。
+
+【模型求解信息】
+{model_build_solve}
+
+【写作要求】
+1. 以表格形式列出主要符号
+2. 包含：符号（$...$ 格式）、含义、单位
+3. 按照出现顺序或逻辑分组排列
+4. 符号应涵盖论文中所有重要变量
+
+【模板参考】
+{config_template["symbol"]}
+""",
+            "judge": f"""【任务】撰写论文的模型评价章节。
+
+【模型求解信息】
+{model_build_solve}
+
+【写作要求】
+1. 模型优点（7.1）：3-5个，每个有具体依据
+2. 模型缺点（7.2）：2-3个，每个有具体分析
+3. 改进与推广（7.3）：100-150字，针对缺点提出改进方案
+4. 优点数量要多于缺点
+5. 总字数300-400字
+
+【模板参考】
+{config_template["judge"]}
+""",
         }
         return flows
 
@@ -111,6 +205,7 @@ class Flows:
         Args:
             key: 任务类型
             coder_response: 代码执行结果
+            code_interpreter: 代码解释器实例
 
         Returns:
             str: 生成的writer_prompt
@@ -119,21 +214,80 @@ class Flows:
 
         questions_quesx_keys = self.get_questions_quesx_keys()
         bgc = self.questions["background"]
+
         quesx_writer_prompt = {
-            key: f"""
-                    问题背景{bgc},不需要编写代码,代码手得到的结果{coder_response},{code_output},按照如下模板撰写：{config_template[key]}
-                """
+            key: f"""【任务】撰写{key.replace("ques", "问题")}的模型建立与求解章节。
+
+【问题背景】
+{bgc}
+
+【代码手求解结果】
+{coder_response}
+
+【代码执行输出】
+{code_output}
+
+【写作要求】
+1. 问题分析与模型选择：150-200字，说明问题类型和模型选择理由
+2. 模型的建立：300-400字，包含完整数学公式（$$...$$ 格式），每个公式后用"其中"说明变量
+3. 模型的求解：200-300字，引用具体数值结果
+4. 结果分析：150-200字，深入解读结果
+5. 总字数约800-1000字
+6. 必须插入代码手生成的图片（![描述](文件名.png) 格式）
+7. 每张图片后至少3行分析解读
+
+【模板参考】
+{config_template[key]}
+"""
             for key in questions_quesx_keys
         }
 
         writer_prompt = {
-            "eda": f"""
-                    问题背景{bgc},不需要编写代码,代码手得到的结果{coder_response},{code_output},按照如下模板撰写：{config_template["eda"]}
-                """,
+            "eda": f"""【任务】撰写数据预处理与探索性分析章节。
+
+【问题背景】
+{bgc}
+
+【代码手求解结果】
+{coder_response}
+
+【代码执行输出】
+{code_output}
+
+【写作要求】
+1. 数据基本情况：来源、时间范围、变量个数、样本量
+2. 数据质量：缺失值处理、异常值检测
+3. 描述性统计：关键变量的均值、标准差、最大最小值
+4. 可视化分析：分布特征、趋势、相关性
+5. 总字数约200-300字
+6. 使用"由表X可知""如图X所示"等句式引用图表
+7. 必须插入代码手生成的图片
+
+【模板参考】
+{config_template["eda"]}
+""",
             **quesx_writer_prompt,
-            "sensitivity_analysis": f"""
-                    问题背景{bgc},不需要编写代码,代码手得到的结果{coder_response},{code_output},按照如下模板撰写：{config_template["sensitivity_analysis"]}
-                """,
+            "sensitivity_analysis": f"""【任务】撰写灵敏度分析章节。
+
+【问题背景】
+{bgc}
+
+【代码手求解结果】
+{coder_response}
+
+【代码执行输出】
+{code_output}
+
+【写作要求】
+1. 参数选择与范围：选择2-3个关键参数，说明变化范围（±5%、±10%）
+2. 分析方法与结果：用表格展示参数变化对结果的影响
+3. 稳健性评估：分析模型对参数变化的敏感程度
+4. 总字数约300-500字
+5. 必须插入代码手生成的图表
+
+【模板参考】
+{config_template["sensitivity_analysis"]}
+""",
         }
 
         if key in writer_prompt:
