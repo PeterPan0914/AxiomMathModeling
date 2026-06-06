@@ -17,10 +17,12 @@ class CoordinatorAgent(Agent):
         task_id: str,
         model: LLM,
         context_window: int = 128000,
+        max_retries: int = 5,
         cancel_event: asyncio.Event | None = None,
     ) -> None:
         super().__init__(task_id, model, context_window, cancel_event=cancel_event)
         self.system_prompt = COORDINATOR_PROMPT
+        self.max_retries = max_retries
 
     async def run(self, ques_all: str) -> CoordinatorToModeler:  # type: ignore[reportIncompatibleMethodOverride]
         """解析用户输入的问题并格式化为结构化 JSON。
@@ -30,13 +32,16 @@ class CoordinatorAgent(Agent):
 
         Returns:
             CoordinatorToModeler 对象，包含结构化问题和问题数量。
+
+        Raises:
+            ValueError: 超过最大重试次数仍无法解析。
         """
         await self.append_chat_history(
             {"role": "system", "content": self.system_prompt}
         )
         await self.append_chat_history({"role": "user", "content": ques_all})
         attempt = 0
-        while True:
+        while attempt < self.max_retries:
             try:
                 response = await self._chat(
                     history=self.chat_history,
@@ -58,7 +63,13 @@ class CoordinatorAgent(Agent):
 
             except (json.JSONDecodeError, ValueError, KeyError) as e:
                 attempt += 1
-                logger.warning(f"解析失败 (尝试 {attempt}): {str(e)}")
+                logger.warning(f"解析失败 (尝试 {attempt}/{self.max_retries}): {str(e)}")
+
+                if attempt >= self.max_retries:
+                    raise ValueError(
+                        f"CoordinatorAgent 在 {self.max_retries} 次尝试后仍无法解析问题。"
+                        f"最后的错误: {str(e)}"
+                    )
 
                 # 添加错误反馈提示
                 error_prompt = f"⚠️ 上次响应格式错误: {str(e)}。请严格输出JSON格式"

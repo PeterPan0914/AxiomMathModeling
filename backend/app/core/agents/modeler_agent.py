@@ -59,10 +59,12 @@ class ModelerAgent(Agent):
         task_id: str,
         model: LLM,
         context_window: int = 128000,
+        max_retries: int = 5,
         cancel_event: asyncio.Event | None = None,
     ) -> None:
         super().__init__(task_id, model, context_window, cancel_event=cancel_event)
         self.system_prompt = MODELER_PROMPT
+        self.max_retries = max_retries
 
     async def run(self, coordinator_to_modeler: CoordinatorToModeler) -> ModelerToCoder:  # type: ignore[reportIncompatibleMethodOverride]
         """根据协调者拆解的问题生成建模方案。
@@ -72,6 +74,9 @@ class ModelerAgent(Agent):
 
         Returns:
             ModelerToCoder 对象，包含各问题的建模解决方案。
+
+        Raises:
+            ValueError: 超过最大重试次数仍无法解析。
         """
         await self.append_chat_history(
             {"role": "system", "content": self.system_prompt}
@@ -84,7 +89,7 @@ class ModelerAgent(Agent):
         )
 
         attempt = 0
-        while True:
+        while attempt < self.max_retries:
             response = await self._chat(
                 history=self.chat_history,
                 agent_name=self.__class__.__name__,
@@ -101,8 +106,15 @@ class ModelerAgent(Agent):
 
             attempt += 1
             logger.warning(
-                f"JSON 解析失败 (第{attempt}次)，请求模型重新生成"
+                f"JSON 解析失败 (第{attempt}/{self.max_retries}次)，请求模型重新生成"
             )
+
+            if attempt >= self.max_retries:
+                raise ValueError(
+                    f"ModelerAgent 在 {self.max_retries} 次尝试后仍无法生成有效的 JSON。"
+                    f"最后的输出: {json_str[:200]}..."
+                )
+
             retry_msg: dict = {"role": "assistant", "content": json_str}
             if response.reasoning_content:
                 retry_msg["reasoning_content"] = response.reasoning_content

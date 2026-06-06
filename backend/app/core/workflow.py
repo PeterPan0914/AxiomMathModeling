@@ -161,45 +161,72 @@ class MathModelWorkFlow(WorkFlow):
         solution_flows = flows.get_solution_flows(self.questions, modeler_response)
         config_template = get_config_template(problem.comp_template)
 
+        total_subtasks = len(solution_flows)
+        completed_subtasks = 0
+        failed_subtasks = []
+
         for key, value in solution_flows.items():
             await self._check_cancelled()
+            completed_subtasks += 1
 
+            try:
+                await redis_manager.publish_message(
+                    self.task_id,
+                    SystemMessage(content=f"代码手开始求解{key} ({completed_subtasks}/{total_subtasks})"),
+                )
+
+                coder_response = await coder_agent.run(
+                    prompt=value["coder_prompt"], subtask_title=key
+                )
+
+                await redis_manager.publish_message(
+                    self.task_id,
+                    SystemMessage(content=f"代码手求解成功{key}", type="success"),
+                )
+
+                writer_prompt = flows.get_writer_prompt(
+                    key, coder_response.code_response or "", code_interpreter, config_template
+                )
+
+                await redis_manager.publish_message(
+                    self.task_id,
+                    SystemMessage(content=f"论文手开始写{key}部分"),
+                )
+
+                writer_response = await writer_agent.run(
+                    writer_prompt,
+                    available_images=coder_response.created_images,
+                    sub_title=key,
+                )
+
+                await redis_manager.publish_message(
+                    self.task_id,
+                    SystemMessage(content=f"论文手完成{key}部分", type="success"),
+                )
+
+                user_output.set_res(key, writer_response)
+
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                error_msg = f"子任务 {key} 执行失败: {str(e)}"
+                logger.error(error_msg)
+                failed_subtasks.append(key)
+                await redis_manager.publish_message(
+                    self.task_id,
+                    SystemMessage(content=error_msg, type="error"),
+                )
+                # 继续执行下一个子任务，而不是终止整个工作流
+                continue
+
+        if failed_subtasks:
             await redis_manager.publish_message(
                 self.task_id,
-                SystemMessage(content=f"代码手开始求解{key}"),
+                SystemMessage(
+                    content=f"警告: {len(failed_subtasks)} 个子任务失败: {', '.join(failed_subtasks)}",
+                    type="warning"
+                ),
             )
-
-            coder_response = await coder_agent.run(
-                prompt=value["coder_prompt"], subtask_title=key
-            )
-
-            await redis_manager.publish_message(
-                self.task_id,
-                SystemMessage(content=f"代码手求解成功{key}", type="success"),
-            )
-
-            writer_prompt = flows.get_writer_prompt(
-                key, coder_response.code_response or "", code_interpreter, config_template
-            )
-
-            await redis_manager.publish_message(
-                self.task_id,
-                SystemMessage(content=f"论文手开始写{key}部分"),
-            )
-
-            ## TODO: 图片引用错误
-            writer_response = await writer_agent.run(
-                writer_prompt,
-                available_images=coder_response.created_images,
-                sub_title=key,
-            )
-
-            await redis_manager.publish_message(
-                self.task_id,
-                SystemMessage(content=f"论文手完成{key}部分"),
-            )
-
-            user_output.set_res(key, writer_response)
 
         # 关闭沙盒
 
