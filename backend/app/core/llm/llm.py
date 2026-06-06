@@ -93,7 +93,7 @@ class LLM:
                     max_tokens=self.max_tokens,
                     top_p=top_p,
                 )
-                logger.info(f"API返回: content={response.content!r}, tool_calls={len(response.tool_calls)}")
+                logger.info(f"API返回: content={response.content!r}, tool_calls={len(response.tool_calls)}, reasoning={response.reasoning_content[:200] if response.reasoning_content else None!r}")
                 self.chat_count += 1
                 await self.send_message(response, agent_name, sub_title)
                 return response

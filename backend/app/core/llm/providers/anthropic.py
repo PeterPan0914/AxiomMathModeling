@@ -41,14 +41,15 @@ class AnthropicProvider(BaseProvider):
         response = await client.messages.create(**kwargs)
 
         content_parts: list[str] = []
+        thinking_parts: list[str] = []
         tool_calls: list[ToolCall] = []
 
         for block in response.content:
             if block.type == "text":
                 content_parts.append(block.text)
             elif block.type == "thinking":
-                # 记录 thinking 内容（部分模型如 mimo-v2.5-pro 会返回）
-                content_parts.append(f"[thinking]{block.thinking}[/thinking]")
+                # thinking 内容单独存储到 reasoning_content，不混入 content
+                thinking_parts.append(block.thinking)
             elif block.type == "tool_use":
                 tool_calls.append(ToolCall(
                     id=block.id,
@@ -57,13 +58,14 @@ class AnthropicProvider(BaseProvider):
                 ))
 
         content = "".join(content_parts) if content_parts else None
+        reasoning_content = "\n".join(thinking_parts) if thinking_parts else None
 
         usage = Usage(
             prompt_tokens=response.usage.input_tokens,
             completion_tokens=response.usage.output_tokens,
         )
 
-        return StandardResponse(content=content, tool_calls=tool_calls, usage=usage)
+        return StandardResponse(content=content, reasoning_content=reasoning_content, tool_calls=tool_calls, usage=usage)
 
     def _convert_messages(self, messages: list[dict]) -> tuple[str | None, list[dict]]:
         """将 OpenAI 格式 messages 转为 Anthropic 格式。"""
