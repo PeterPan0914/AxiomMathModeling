@@ -85,6 +85,14 @@ class E2BCodeInterpreter(BaseCodeInterpreter):
 
     async def _pre_execute_code(self):
         init_code = (
+            # 预注入常用科学计算库，防止 LLM 生成代码时使用未导入的缩写
+            "import numpy as np\n"
+            "import pandas as pd\n"
+            "import scipy\n"
+            "import scipy.stats as sc\n"
+            "from scipy import optimize, interpolate, signal, linalg, sparse\n"
+            "from scipy.stats import norm, t, chi2, f as f_dist, binom, poisson\n"
+            "print('科学计算库预加载完成: numpy, pandas, scipy')\n"
             # 加载中文字体，确保图表中文正常显示（跨平台兼容）
             "import os\n"
             "import matplotlib\n"

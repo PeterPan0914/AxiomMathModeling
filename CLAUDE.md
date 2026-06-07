@@ -373,6 +373,25 @@ const rendered = computed(() => marked.parse(props.content));
 
 ## Boundaries
 
+### Docker 重建规则（重要）
+
+**禁止自动执行 `docker compose up -d --build` 或任何 Docker 重建命令。**
+
+### Git 提交规则（重要）
+
+**每次修改代码后必须立即 git commit。** 不要忘记提交，不要攒到最后一次性提交。
+
+- 每个逻辑独立的改动单独提交（不要把无关改动混在一个 commit 里）
+- 提交信息格式：`<type>: <描述>`（feat/fix/refactor/chore/enhance/docs）
+- 示例：`fix: 预注入 scipy 缩写防止 CoderAgent 生成代码时 NameError`
+
+### Docker 重建规则（重要）
+
+修改后端代码后，只需：
+1. 提示用户代码已修改，需要重建 Docker 镜像
+2. 给出重建命令：`wsl docker compose up -d --build backend`
+3. **不要自动执行该命令**，由用户手动执行
+
 ### 不要修改的内容
 
 - `frontend/src/components/ui/` — shadcn-vue 第三方 UI 库组件
@@ -391,3 +410,4 @@ const rendered = computed(() => marked.parse(props.content));
 - 后端科学计算包（numpy、pandas、scikit-learn 等）是 Jupyter 内核依赖，CoderAgent 生成的代码在内核中执行时需要，不能移除
 - `e2b-code-interpreter` 是可选的云端沙箱依赖，本地开发可移除
 - 前端 `components/ui/` 下的 shadcn-vue 组件由工具生成，手动修改会被覆盖
+

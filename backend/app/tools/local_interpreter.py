@@ -46,6 +46,14 @@ class LocalCodeInterpreter(BaseCodeInterpreter):
             f"os.makedirs(work_dir, exist_ok=True)\n"
             f"os.chdir(work_dir)\n"
             f"print('当前工作目录:', os.getcwd())\n"
+            # 预注入常用科学计算库，防止 LLM 生成代码时使用未导入的缩写
+            f"import numpy as np\n"
+            f"import pandas as pd\n"
+            f"import scipy\n"
+            f"import scipy.stats as sc\n"
+            f"from scipy import optimize, interpolate, signal, linalg, sparse\n"
+            f"from scipy.stats import norm, t, chi2, f as f_dist, binom, poisson\n"
+            f"print('科学计算库预加载完成: numpy, pandas, scipy')\n"
             # 加载中文字体，确保图表中文正常显示（跨平台兼容）
             # 先清除 matplotlib 字体缓存，避免旧缓存导致 addfont 失效
             f"import matplotlib\n"
