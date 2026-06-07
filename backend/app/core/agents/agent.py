@@ -12,8 +12,8 @@ if TYPE_CHECKING:
 
 # 每个字符估算的 token 数（中英混合文本的保守估计）
 _CHARS_PER_TOKEN = 3
-# 触发压缩的 token 占比阈值（相对 context_window）
-_DEFAULT_TOKEN_THRESHOLD_RATIO = 0.65
+# 触发压缩的 token 占比阈值（相对 context_window），配合 _chat() 中 85% pre-check 使用
+_DEFAULT_TOKEN_THRESHOLD_RATIO = 0.75
 
 
 class Agent:

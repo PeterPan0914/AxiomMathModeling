@@ -100,8 +100,8 @@ class CoderAgent(Agent):
                     created_images=[])
 
 
-            effective_max_turns = self.max_chat_turns if self.max_chat_turns is not None else 20
-            if self.current_chat_turns >= effective_max_turns:
+            # 仅当显式设置了 max_chat_turns 时才限制，否则不限制轮次
+            if self.max_chat_turns is not None and self.current_chat_turns >= self.max_chat_turns:
                 logger.error(f"超过最大聊天次数: {effective_max_turns}")
                 await redis_manager.publish_message(
                     self.task_id,
@@ -109,7 +109,7 @@ class CoderAgent(Agent):
                 )
                 return CoderToWriter(
                     code_response=f"任务因超过最大聊天轮次({effective_max_turns})而结束，已完成部分结果",
-                    created_images=self.code_interpreter.get_created_images() if self.code_interpreter else [],
+                    created_images=await self.code_interpreter.get_created_images(subtask_title) if self.code_interpreter else [],
                 )
 
             self.current_chat_turns += 1
