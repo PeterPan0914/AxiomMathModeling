@@ -134,6 +134,8 @@ class UserOutput:
         ref_index = 1
 
         for seq_key in self.seq:
+            if seq_key not in replace_res:
+                continue
             text = replace_res[seq_key]["response_content"]
             # 找到[uuid]
             uuid_list = re.findall(r"\[([a-f0-9-]{36})\]", text)
@@ -177,8 +179,9 @@ class UserOutput:
 
         sort_res = self.sort_text_with_footnotes(replace_res)
 
+        # 只拼接实际有内容的章节，跳过未写入的 key（如 eda 未生成时）
         full_res_1 = "\n\n".join(
-            [sort_res[key]["response_content"] for key in self.seq]
+            [sort_res[key]["response_content"] for key in self.seq if key in sort_res]
         )
 
         full_res = self.append_footnotes_to_text(full_res_1)
