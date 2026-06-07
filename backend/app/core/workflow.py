@@ -2,6 +2,10 @@
 
 import asyncio
 from app.core.agents import WriterAgent, CoderAgent, CoordinatorAgent, ModelerAgent, ReviewAgent
+from app.core.agents.result_interpreter_agent import ResultInterpreterAgent
+from app.core.agents.review_agent import MultiReviewer
+from app.core.agents.problem_analyst_agent import ProblemAnalystAgent
+import json as json_module
 from app.core.evaluation import QualityScore, QualityReport, QualityTracker
 from app.core.structure_control import StructureController, SectionStatus
 from app.schemas.request import Problem
@@ -17,6 +21,7 @@ from app.services.redis_manager import redis_manager
 from app.tools.notebook_serializer import NotebookSerializer
 from app.core.flows import Flows
 from app.core.llm.llm_factory import LLMFactory
+from app.core.paper_context import PaperContext
 
 # Reflexion 配置（从 settings 读取）
 def _get_reflexion_config():
@@ -114,8 +119,27 @@ class MathModelWorkFlow(WorkFlow):
 
         await redis_manager.publish_message(
             self.task_id,
-            SystemMessage(content="识别用户意图和拆解问题完成,任务转交给建模手"),
+            SystemMessage(content="识别用户意图和拆解问题完成"),
         )
+
+        # 题目深度分析：识别陷阱、预判评分重点、分析子任务依赖
+        problem_analyst = ProblemAnalystAgent(
+            self.task_id, coordinator_llm,
+            context_window=settings.COORDINATOR_CONTEXT_WINDOW,
+            cancel_event=self.cancel_event,
+            diagnostic_logger=diag,
+        )
+        try:
+            problem_analysis = await problem_analyst.run(
+                problem.ques_all, self.questions
+            )
+            logger.info(f"[ProblemAnalyst] 陷阱: {problem_analysis.pitfalls}")
+            logger.info(f"[ProblemAnalyst] 评分重点: {problem_analysis.scoring_focus}")
+            # 将分析结果注入 PaperContext
+            paper_context.set_core_argument(problem_analysis.data_characteristics)
+        except Exception as e:
+            logger.warning(f"题目深度分析失败（不影响流程）: {e}")
+            problem_analysis = None
 
         await redis_manager.publish_message(
             self.task_id,
@@ -131,7 +155,16 @@ class MathModelWorkFlow(WorkFlow):
             diagnostic_logger=diag,
         )
 
-        modeler_response = await modeler_agent.run(coordinator_response)
+        # 将题目分析结果传给建模手
+        analysis_text = ""
+        if problem_analysis:
+            analysis_text = (
+                f"陷阱识别: {'; '.join(problem_analysis.pitfalls)}\n"
+                f"评分重点: {'; '.join(problem_analysis.scoring_focus)}\n"
+                f"禁用方法: {json.dumps(problem_analysis.forbidden_methods, ensure_ascii=False)}"
+            )
+
+        modeler_response = await modeler_agent.run(coordinator_response, problem_analysis=analysis_text)  # type: ignore[call-arg]
 
         user_output = UserOutput(work_dir=self.work_dir, ques_count=self.ques_count)
 
@@ -190,6 +223,15 @@ class MathModelWorkFlow(WorkFlow):
             diagnostic_logger=diag,
         )
 
+        # 初始化结果解读 Agent（在 CoderAgent 执行后解读结果）
+        result_interpreter = ResultInterpreterAgent(
+            task_id=problem.task_id,
+            model=writer_llm,  # 使用同一个 LLM
+            context_window=settings.WRITER_CONTEXT_WINDOW,
+            cancel_event=self.cancel_event,
+            diagnostic_logger=diag,
+        )
+
         # 初始化评审 Agent（用于 Reflexion 循环）
         review_agent = ReviewAgent(
             task_id=problem.task_id,
@@ -198,6 +240,18 @@ class MathModelWorkFlow(WorkFlow):
             cancel_event=self.cancel_event,
             diagnostic_logger=diag,
         )
+
+        # 三审制协调器（方法论/写作/格式 三个专项审稿人并行评审）
+        multi_reviewer = MultiReviewer(
+            task_id=problem.task_id,
+            model=writer_llm,
+            context_window=settings.WRITER_CONTEXT_WINDOW,
+            cancel_event=self.cancel_event,
+            diagnostic_logger=diag,
+        )
+
+        # 初始化论文全局上下文（共享状态，解决 Agent 间信息断裂问题）
+        paper_context = PaperContext()
 
         flows = Flows(self.questions)
 
@@ -228,8 +282,54 @@ class MathModelWorkFlow(WorkFlow):
                     SystemMessage(content=f"代码手求解成功{key}", type="success"),
                 )
 
+                # 结果解读：在写论文前先判断结果是否合理
+                code_output = code_interpreter.get_code_output(key)
+                model_spec_text = solutions.get(key, "")
+                try:
+                    interpreter_result = await result_interpreter.run(
+                        code_output=code_output or "",
+                        subtask_title=key,
+                        model_spec=model_spec_text[:2000],
+                    )
+                    # 把解读结果注入 PaperContext
+                    if interpreter_result.key_findings.conclusion:
+                        paper_context.update_key_result(
+                            section_key=key,
+                            conclusion=interpreter_result.key_findings.conclusion,
+                            key_numbers=interpreter_result.key_findings.key_numbers,
+                        )
+                    # 如果结果不合理，记录警告
+                    if not interpreter_result.sanity_check.is_reasonable:
+                        warn_msg = f"⚠️ {key} 结果可能不合理: {', '.join(interpreter_result.sanity_check.issues)}"
+                        logger.warning(f"[ResultInterpreter] {warn_msg}")
+                        await redis_manager.publish_message(
+                            self.task_id,
+                            SystemMessage(content=warn_msg, type="warning"),
+                        )
+                except Exception as e:
+                    logger.warning(f"结果解读失败（不影响流程）: {e}")
+
+                # 更新 PaperContext：从代码执行结果中提取关键数据
+                if coder_response.code_response:
+                    paper_context.update_key_result(
+                        section_key=key,
+                        conclusion=coder_response.code_response[:300] if coder_response.code_response else "",
+                        figures=coder_response.created_images or [],
+                    )
+                # 从代码执行输出中提取数值
+                code_output = code_interpreter.get_code_output(key)
+                if code_output:
+                    paper_context._extract_key_numbers(key, code_output)
+                # 从 modeler 响应中提取模型选择信息
+                if key in solutions:
+                    model_text = solutions[key]
+                    # 提取方法名（取第一行作为方法描述）
+                    first_line = model_text.split("\n")[0][:100] if model_text else ""
+                    paper_context.model_choices[key] = first_line
+
                 writer_prompt = flows.get_writer_prompt(
-                    key, coder_response.code_response or "", code_interpreter, config_template
+                    key, coder_response.code_response or "", code_interpreter, config_template,
+                    paper_context=paper_context,
                 )
 
                 await redis_manager.publish_message(
@@ -279,7 +379,8 @@ class MathModelWorkFlow(WorkFlow):
         ################################################ write steps with Reflexion
 
         write_flows = flows.get_write_flows(
-            user_output, config_template, problem.ques_all
+            user_output, config_template, problem.ques_all,
+            paper_context=paper_context,
         )
         failed_write_sections = []
         for key, value in write_flows.items():
@@ -298,9 +399,13 @@ class MathModelWorkFlow(WorkFlow):
                     prompt=value,
                     sub_title=key,
                     quality_tracker=quality_tracker,
+                    multi_reviewer=multi_reviewer,
                 )
 
                 user_output.set_res(key, writer_response)
+
+                # 更新 PaperContext：从 Writer 输出中提取信息
+                paper_context.extract_from_writer_response(key, writer_response.response_content)
 
                 # 结构控制：检查章节篇幅
                 section_report = structure_controller.check_section(
@@ -404,6 +509,11 @@ class MathModelWorkFlow(WorkFlow):
         # 保存诊断数据
         diag.save_quality_data(quality_tracker.get_summary())
 
+        # 保存 PaperContext（论文全局上下文）
+        paper_context.save(self.work_dir)
+        logger.info(f"[PaperContext] 已保存论文上下文，共 {len(paper_context.key_results)} 个关键结果，"
+                     f"{len(paper_context.defined_symbols)} 个符号定义")
+
         user_output.save_result()
 
     async def _writing_with_reflexion(
@@ -413,16 +523,19 @@ class MathModelWorkFlow(WorkFlow):
         prompt: str,
         sub_title: str,
         quality_tracker: QualityTracker | None = None,
+        multi_reviewer: MultiReviewer | None = None,
     ) -> 'WriterResponse':
         """带 Reflexion 循环的写作流程。
 
         实现：生成 -> 评审 -> 反馈 -> 改进 的迭代循环。
+        使用三审制（方法论/写作/格式）进行并行评审。
 
         Args:
             writer_agent: 写作 Agent。
-            review_agent: 评审 Agent。
+            review_agent: 评审 Agent（综合评审，用于 Reflexion 改进轮次）。
             prompt: 写作提示。
             sub_title: 子任务标题。
+            multi_reviewer: 三审制协调器（首轮使用，提供更全面的反馈）。
 
         Returns:
             WriterResponse 对象。
@@ -472,17 +585,25 @@ class MathModelWorkFlow(WorkFlow):
                     sub_title=f"{sub_title} (修订 {iteration + 1})",
                 )
 
-            # 2. 评审
+            # 2. 评审（首轮使用三审制，后续轮次使用综合评审以节省 token）
             await redis_manager.publish_message(
                 self.task_id,
                 SystemMessage(content=f"正在评审{sub_title} (第 {iteration + 1} 轮)"),
             )
 
-            review_result = await review_agent.run(
-                paper_content=current_response.response_content,
-                section_name=sub_title,
-                sub_title=f"评审 {sub_title}",
-            )
+            if iteration == 0 and multi_reviewer:
+                # 首轮：三审制并行评审（方法论+写作+格式）
+                review_result = await multi_reviewer.run(
+                    paper_content=current_response.response_content,
+                    section_name=sub_title,
+                )
+            else:
+                # 后续轮次：综合评审（节省 token）
+                review_result = await review_agent.run(
+                    paper_content=current_response.response_content,
+                    section_name=sub_title,
+                    sub_title=f"评审 {sub_title}",
+                )
 
             # 3. 记录质量报告
             quality_score = QualityScore(

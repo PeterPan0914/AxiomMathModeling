@@ -8,10 +8,68 @@ from app.core.prompts import MODELER_PROMPT
 
 if TYPE_CHECKING:
     from app.utils.diagnostic_logger import DiagnosticLogger
-from app.schemas.A2A import CoordinatorToModeler, ModelerToCoder
+from app.schemas.A2A import CoordinatorToModeler, ModelerToCoder, ModelSpec
 from app.utils.log_util import logger
 import json
 import re
+
+
+def extract_model_specs(questions_solution: dict[str, str]) -> dict[str, ModelSpec]:
+    """从建模方案文本中提取结构化的 model_spec。
+
+    Args:
+        questions_solution: 建模手输出的各问题方案文本。
+
+    Returns:
+        各问题的 ModelSpec 字典。
+    """
+    specs: dict[str, ModelSpec] = {}
+    pattern = r'---MODEL_SPEC_START---\s*\n(.*?)\n\s*---MODEL_SPEC_END---'
+
+    for key, text in questions_solution.items():
+        if not key.startswith("ques"):
+            continue
+        match = re.search(pattern, text, re.DOTALL)
+        if not match:
+            continue
+
+        spec_text = match.group(1)
+        spec = ModelSpec()
+
+        for line in spec_text.strip().split("\n"):
+            line = line.strip()
+            if not line or ":" not in line:
+                continue
+            # 只 split 第一个冒号（值中可能包含冒号）
+            colon_idx = line.index(":")
+            field_name = line[:colon_idx].strip().upper()
+            field_value = line[colon_idx + 1:].strip()
+
+            if field_name == "OBJECTIVE":
+                spec.objective = field_value
+            elif field_name == "CONSTRAINTS":
+                spec.constraints = [c.strip() for c in field_value.split(";") if c.strip()]
+            elif field_name == "ALGORITHM":
+                spec.algorithm = field_value
+            elif field_name == "KEY_PARAMS":
+                # 解析 key=value 对
+                for param in field_value.split(";"):
+                    param = param.strip()
+                    if "=" in param:
+                        pk, pv = param.split("=", 1)
+                        spec.key_params[pk.strip()] = pv.strip()
+            elif field_name == "EXPECTED_OUTPUT":
+                spec.expected_output = field_value
+            elif field_name == "VALIDATION_METHOD":
+                spec.validation_method = field_value
+            elif field_name == "PSEUDOCODE":
+                # 伪代码可能跨行（以 |- 开头的 YAML 多行字符串格式）
+                spec.pseudocode = field_value
+
+        specs[key] = spec
+        logger.info(f"提取到 {key} 的 model_spec: objective={spec.objective[:50]}...")
+
+    return specs
 
 
 def repair_json(json_str: str) -> dict | None:
@@ -72,11 +130,16 @@ class ModelerAgent(Agent):
         self.system_prompt = MODELER_PROMPT
         self.max_retries = max_retries
 
-    async def run(self, coordinator_to_modeler: CoordinatorToModeler) -> ModelerToCoder:  # type: ignore[reportIncompatibleMethodOverride]
+    async def run(  # type: ignore[reportIncompatibleMethodOverride]
+        self,
+        coordinator_to_modeler: CoordinatorToModeler,
+        problem_analysis: str = "",
+    ) -> ModelerToCoder:
         """根据协调者拆解的问题生成建模方案。
 
         Args:
             coordinator_to_modeler: 协调者传递的结构化问题信息。
+            problem_analysis: 题目深度分析结果（可选，来自 ProblemAnalystAgent）。
 
         Returns:
             ModelerToCoder 对象，包含各问题的建模解决方案。
@@ -87,11 +150,13 @@ class ModelerAgent(Agent):
         await self.append_chat_history(
             {"role": "system", "content": self.system_prompt}
         )
+
+        # 构造用户消息，包含问题信息和题目分析
+        user_msg = json.dumps(coordinator_to_modeler.questions, ensure_ascii=False)
+        if problem_analysis:
+            user_msg += f"\n\n【题目深度分析（参考）】\n{problem_analysis}"
         await self.append_chat_history(
-            {
-                "role": "user",
-                "content": json.dumps(coordinator_to_modeler.questions),
-            }
+            {"role": "user", "content": user_msg}
         )
 
         attempt = 0
@@ -117,8 +182,14 @@ class ModelerAgent(Agent):
 
             questions_solution = repair_json(json_str)
             if questions_solution:
-                logger.info(f"建模方案解析成功: {list(questions_solution.keys())}")
-                return ModelerToCoder(questions_solution=questions_solution)
+                # 提取结构化的 model_spec（给 CoderAgent 的精确接口）
+                model_specs = extract_model_specs(questions_solution)
+                logger.info(f"建模方案解析成功: {list(questions_solution.keys())}, "
+                           f"提取到 {len(model_specs)} 个 model_spec")
+                return ModelerToCoder(
+                    questions_solution=questions_solution,
+                    model_specs=model_specs,
+                )
 
             attempt += 1
             logger.warning(

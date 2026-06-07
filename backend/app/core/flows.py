@@ -1,9 +1,14 @@
 """工作流程定义模块，管理建模任务的求解和写作流程。"""
 
+from __future__ import annotations
+from typing import TYPE_CHECKING
 from app.models.user_output import UserOutput
 from app.tools.base_interpreter import BaseCodeInterpreter
 from app.core.agents.modeler_agent import ModelerToCoder
 from app.core.structure_control import StructureController
+
+if TYPE_CHECKING:
+    from app.core.paper_context import PaperContext
 
 
 class Flows:
@@ -51,12 +56,35 @@ class Flows:
             if key.startswith("ques") and key != "ques_count"
         }
         solutions = modeler_response.questions_solution
+        model_specs = modeler_response.model_specs or {}
+
+        def _build_coder_prompt(ques_key: str, ques_desc: str) -> str:
+            """构建 CoderAgent 的 prompt，注入 model_spec（如有）。"""
+            solution_text = solutions.get(ques_key, "")
+            spec = model_specs.get(ques_key)
+            spec_section = ""
+            if spec:
+                spec_section = f"""
+
+【结构化模型规格（必须严格遵循）】
+- 目标函数: {spec.objective}
+- 约束条件: {'; '.join(spec.constraints) if spec.constraints else '无'}
+- 求解算法: {spec.algorithm}
+- 关键参数: {', '.join(f'{k}={v}' for k, v in spec.key_params.items()) if spec.key_params else '无'}
+- 预期输出: {spec.expected_output}
+- 验证方法: {spec.validation_method}
+- 伪代码参考:
+{spec.pseudocode}
+"""
+            return f"""
+                        参考建模手给出的解决方案{solution_text}
+                        完成如下问题{ques_desc}
+                        {spec_section}
+                    """
+
         ques_flow = {
             key: {
-                "coder_prompt": f"""
-                        参考建模手给出的解决方案{solutions.get(key, "")}
-                        完成如下问题{value}
-                    """,
+                "coder_prompt": _build_coder_prompt(key, value),
             }
             for key, value in questions_quesx.items()
         }
@@ -85,7 +113,8 @@ class Flows:
         return flows
 
     def get_write_flows(
-        self, user_output: UserOutput, config_template: dict, bg_ques_all: str
+        self, user_output: UserOutput, config_template: dict, bg_ques_all: str,
+        paper_context: PaperContext | None = None,
     ):
         """生成写作阶段的流程配置。
 
@@ -99,8 +128,11 @@ class Flows:
         """
         sc = self.structure_controller
         model_build_solve = user_output.get_model_build_solve()
+        # PaperContext 上下文注入
+        ctx_injection = paper_context.inject_into_prompt("firstPage") if paper_context else ""
         flows = {
             "firstPage": f"""【任务】撰写论文的标题、摘要和关键词。
+{ctx_injection}
 
 【问题背景】
 {bg_ques_all}
@@ -126,6 +158,7 @@ class Flows:
 {config_template["firstPage"]}
 """,
             "RepeatQues": f"""【任务】撰写论文的问题重述章节。
+{paper_context.inject_into_prompt("RepeatQues") if paper_context else ""}
 
 【问题背景】
 {bg_ques_all}
@@ -147,6 +180,7 @@ class Flows:
 {config_template["RepeatQues"]}
 """,
             "analysisQues": f"""【任务】撰写论文的问题分析章节。
+{paper_context.inject_into_prompt("analysisQues") if paper_context else ""}
 
 【问题背景】
 {bg_ques_all}
@@ -171,6 +205,7 @@ class Flows:
 {config_template["analysisQues"]}
 """,
             "modelAssumption": f"""【任务】撰写论文的模型假设章节。
+{paper_context.inject_into_prompt("modelAssumption") if paper_context else ""}
 
 【问题背景】
 {bg_ques_all}
@@ -192,6 +227,7 @@ class Flows:
 {config_template["modelAssumption"]}
 """,
             "symbol": f"""【任务】撰写论文的符号说明章节。
+{paper_context.inject_into_prompt("symbol") if paper_context else ""}
 
 【模型求解信息】
 {model_build_solve}
@@ -210,6 +246,7 @@ class Flows:
 {config_template["symbol"]}
 """,
             "judge": f"""【任务】撰写论文的模型评价章节。
+{paper_context.inject_into_prompt("judge") if paper_context else ""}
 
 【模型求解信息】
 {model_build_solve}
@@ -238,6 +275,7 @@ class Flows:
         coder_response: str,
         code_interpreter: BaseCodeInterpreter,
         config_template: dict,
+        paper_context: PaperContext | None = None,
     ) -> str:
         """根据不同的key生成对应的writer_prompt
 
@@ -253,9 +291,11 @@ class Flows:
 
         questions_quesx_keys = self.get_questions_quesx_keys()
         bgc = self.questions["background"]
+        ctx_injection = paper_context.inject_into_prompt(key) if paper_context else ""
 
         quesx_writer_prompt = {
             key: f"""【任务】撰写{key.replace("ques", "问题")}的模型建立与求解章节。
+{ctx_injection}
 
 【问题背景】
 {bgc}
@@ -288,6 +328,7 @@ class Flows:
 
         writer_prompt = {
             "eda": f"""【任务】撰写数据预处理与探索性分析章节。
+{paper_context.inject_into_prompt("eda") if paper_context else ""}
 
 【问题背景】
 {bgc}
@@ -318,6 +359,7 @@ class Flows:
 """,
             **quesx_writer_prompt,
             "sensitivity_analysis": f"""【任务】撰写鲁棒性与灵敏度分析章节（六维度框架）。
+{paper_context.inject_into_prompt("sensitivity_analysis") if paper_context else ""}
 
 【问题背景】
 {bgc}

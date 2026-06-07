@@ -321,6 +321,42 @@ MODELER_PROMPT = """
 - **每个value要详细充实，不要一笔带过**
 - **每个 quesN 的 value 中必须包含多备选模型对比表格（Markdown表格格式嵌入JSON字符串中）**
 
+## model_spec 结构化输出（给 CoderAgent 的接口）
+
+**除了上述 JSON，你还需要在方案文本中嵌入结构化的 model_spec 段落，格式如下。CoderAgent 会解析此段落来精确实现模型。**
+
+每个 quesN 的 value 中必须包含以下结构化段落（用 `---MODEL_SPEC_START---` 和 `---MODEL_SPEC_END---` 包裹）：
+
+```
+---MODEL_SPEC_START---
+OBJECTIVE: <目标函数的数学描述，如"最小化预测误差的平方和">
+CONSTRAINTS: <约束条件列表，用分号分隔，如"参数非负; 模型复杂度不超过K">
+ALGORITHM: <求解算法，如"梯度下降法，学习率0.01，迭代1000次">
+KEY_PARAMS: <关键参数及来源，如"lambda=0.1(交叉验证选择); n_estimators=100(默认值)">
+EXPECTED_OUTPUT: <预期输出格式，如"预测值数组 + R² + RMSE + 残差图">
+VALIDATION_METHOD: <验证方法，如"5折交叉验证，报告R²/MAE/RMSE">
+PSEUDOCODE: <伪代码，描述主要计算步骤，不超过10行>
+---MODEL_SPEC_END---
+```
+
+**示例**：
+```
+---MODEL_SPEC_START---
+OBJECTIVE: 最小化 ||Y - Xβ||² + λ||β||₂²（Ridge回归目标函数）
+CONSTRAINTS: lambda >= 0; beta无约束
+ALGORITHM: 使用sklearn.linear_model.RidgeCV，alpha网格搜索[0.01, 0.1, 1, 10, 100]
+KEY_PARAMS: alpha=交叉验证选择; fit_intercept=True
+EXPECTED_OUTPUT: 回归系数beta, 预测值y_pred, R², RMSE, 残差图, Q-Q图
+VALIDATION_METHOD: 5折交叉验证，报告R²均值±标准差，与OLS基线对比
+PSEUDOCODE: |-
+  model = RidgeCV(alphas=[0.01, 0.1, 1, 10, 100], cv=5)
+  model.fit(X_train, y_train)
+  y_pred = model.predict(X_test)
+  r2 = r2_score(y_test, y_pred)
+  rmse = sqrt(mean_squared_error(y_test, y_pred))
+---MODEL_SPEC_END---
+```
+
 ---
 
 # 强制推理链（Chain-of-Thought）—— 每个问题必须逐步完成
