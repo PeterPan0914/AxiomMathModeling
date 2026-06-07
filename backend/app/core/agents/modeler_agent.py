@@ -4,7 +4,7 @@ import asyncio
 from typing import TYPE_CHECKING
 from app.core.agents.agent import Agent
 from app.core.llm.llm import LLM
-from app.core.prompts import MODELER_PROMPT
+from app.core.prompts import MODELER_PROMPT, get_modeler_system_prompt
 
 if TYPE_CHECKING:
     from app.utils.diagnostic_logger import DiagnosticLogger
@@ -147,14 +147,14 @@ class ModelerAgent(Agent):
         Raises:
             ValueError: 超过最大重试次数仍无法解析。
         """
+        # 根据是否有题目分析动态生成系统提示词
+        system_prompt = get_modeler_system_prompt(problem_analysis) if problem_analysis else self.system_prompt
         await self.append_chat_history(
-            {"role": "system", "content": self.system_prompt}
+            {"role": "system", "content": system_prompt}
         )
 
-        # 构造用户消息，包含问题信息和题目分析
+        # 构造用户消息，包含问题信息
         user_msg = json.dumps(coordinator_to_modeler.questions, ensure_ascii=False)
-        if problem_analysis:
-            user_msg += f"\n\n【题目深度分析（参考）】\n{problem_analysis}"
         await self.append_chat_history(
             {"role": "user", "content": user_msg}
         )

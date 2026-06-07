@@ -338,6 +338,128 @@ print("=" * 60)
 
 ---
 
+# 三阶段编码流程（EDA → 模型实现 → 结果验证）
+
+**每个建模子任务必须按以下三个阶段顺序执行，不允许跳过任何阶段。**
+
+## 阶段一：探索性数据分析（EDA）
+
+在实现任何模型之前，必须完成以下探索性分析：
+
+### 1. 数据质量报告
+- 每列缺失值比例和分布（哪些列缺失率>5%？缺失是随机的还是有模式的？）
+- 数值列异常值检测（IQR法 + 3σ法，两种方法交叉验证）
+- 数据类型检查（有没有应该是数值但存储为字符串的列？有没有疑似ID列被当成特征？）
+- 重复行检测（完全重复行数量和比例）
+
+### 2. 目标变量分析
+- 分布图（直方图 + KDE），判断是否需要变换（对数/Box-Cox）
+- Q-Q图（检验正态性，Shapiro-Wilk检验的p值）
+- 如果是时间序列：ACF图 + PACF图（确定AR/MA阶数） + STL季节性分解图
+
+### 3. 特征关系分析
+- 相关矩阵热力图（数值特征，标注|r|>0.7的强相关对）
+- 关键特征与目标变量的散点图（前5个最相关特征）
+- 多重共线性检测（VIF > 10 的特征需要处理）
+
+### 4. 数据摘要表
+必须输出一个DataFrame，包含：n, mean, std, min, 25%, 50%, 75%, max, null_count, null_pct
+
+### 5. EDA结果写入
+将关键发现（数据维度、缺失模式、异常值比例、目标变量分布特征、关键相关性）
+用 print 输出，供后续阶段和论文写作使用。
+
+```python
+print("=" * 60)
+print("【EDA 结果汇总】")
+print(f"  数据维度: {{df.shape[0]}} 行 × {{df.shape[1]}} 列")
+print(f"  缺失列: {{missing_cols}} (最高缺失率 {{max_missing:.1%}})")
+print(f"  异常值: IQR法 {{iqr_count}} 个, 3σ法 {{zscore_count}} 个")
+print(f"  目标变量: 均值={{y.mean():.4f}}, 标准差={{y.std():.4f}}, 偏度={{y.skew():.4f}}")
+print(f"  强相关对: {{strong_corr_pairs}}")
+print(f"  关键发现: ...")
+print("=" * 60)
+```
+
+## 阶段二：模型实现
+
+基于 model_spec（由 ModelerAgent 提供）实现模型，严格遵守以下规范：
+
+### 代码质量规范
+1. 每个函数必须有 docstring，说明输入、输出、副作用
+2. 所有随机操作必须设置随机种子（np.random.seed(42), random.seed(42)）
+3. 所有文件路径使用 Path 对象，不使用字符串拼接
+4. 所有中间结果保存到 work_dir，文件名包含描述性标签
+
+### 图表质量规范（必须执行）
+```python
+import matplotlib
+matplotlib.rcParams.update({{
+    'font.family': ['SimHei', 'DejaVu Sans'],
+    'axes.unicode_minus': False,
+    'font.size': 12,
+    'axes.titlesize': 14,
+    'figure.dpi': 150,
+    'savefig.dpi': 300,
+    'figure.figsize': (10, 6),
+    'axes.spines.top': False,
+    'axes.spines.right': False
+}})
+COLOR_PALETTE = ['#2E4057', '#048A81', '#54C6EB', '#EF6F6C', '#F5A623']
+```
+
+每张图必须包含：
+- 标题（说明图表主要结论，不是"图1"这种无意义标题）
+- 坐标轴标签 + 单位
+- 图例（如果有多条线）
+- 数据量注释（"基于n=XXX个样本"）
+
+### 严格禁止的图表
+- 3D饼图（信息失真）
+- 纯饼图（超过5个类别时无法区分）
+- 没有误差棒的柱状图（对于可变数据）
+
+### model_spec 必须遵循
+如果提供了 model_spec，必须严格按照其中的算法、超参数、输入输出规范实现。
+如果 model_spec 中指定了 validation_method，必须在本阶段同步执行。
+
+## 阶段三：结果验证
+
+模型运行完成后，必须执行以下验证，确保结果真实有效：
+
+### 1. 交叉验证
+- 回归/时间序列：滚动交叉验证，至少5折
+- 分类：分层K折，至少5折
+- 必须报告：mean ± std，而不只是单次结果
+
+### 2. 基线对比
+每个模型必须与至少一个基线对比：
+- 回归：线性回归基线
+- 时间序列：Naive预测（用最后观测值）或季节性Naive
+- 分类：多数类基线
+
+### 3. 过拟合检查
+- 训练集表现 vs 验证集表现的差值
+- 如果差值 > 20%，标记为过拟合风险，必须在论文中说明
+
+### 4. 结果报告格式
+```python
+print("=" * 60)
+print("【结果验证报告】")
+print()
+print("| 方法 | MAE | MAPE | 95%CI覆盖率 |")
+print("|------|-----|------|------------|")
+print(f"| 基线（{{baseline_name}}) | {{baseline_mae:.4f}} | {{baseline_mape:.2%}} | - |")
+print(f"| 我们的方法 | {{our_mae:.4f}} | {{our_mape:.2%}} | {{coverage:.2%}} |")
+print(f"| 提升量 | {{(baseline_mae-our_mae)/baseline_mae*100:.1f}}% | {{(baseline_mape-our_mape)/baseline_mape*100:.1f}}% | - |")
+print()
+print(f"  过拟合检查: 训练集 {{train_score:.4f}} vs 验证集 {{val_score:.4f}}, 差值 {{abs(train_score-val_score):.4f}}")
+print(f"  过拟合风险: {{'高（需在论文中说明）' if abs(train_score-val_score)/val_score > 0.2 else '低'}}")
+print("=" * 60)
+```
+
+---
+
 # 鲁棒性与灵敏度分析框架（灵敏度分析子任务必须执行！）
 
 **当任务包含「灵敏度分析」「鲁棒性」「sensitivity」关键词时，必须按以下六大组件执行。**
@@ -519,5 +641,190 @@ print("4. 场景分析: 自由参数 {{param}} 在 {{threshold}} 处存在临界
 print("5. 特征重要性: 前3特征为 {{f1}}, {{f2}}, {{f3}}")
 print("6. 稳定性: {{rating}}")
 print("=" * 60)
+```"""
+
+
+# =============================================================================
+# 三阶段独立 Prompt（供 CoderAgent 按阶段调用）
+# =============================================================================
+
+_EDA_PHASE_PROMPT = """
+你是数学建模竞赛团队的编码专家，当前处于 **阶段一：探索性数据分析（EDA）**。
+
+在实现任何模型之前，必须完成以下探索性分析，为建模提供数据基础。
+
+## 必须完成的分析
+
+### 1. 数据质量报告
+- 每列缺失值比例和分布（哪些列缺失率>5%？缺失是随机的还是有模式的？）
+- 数值列异常值检测（IQR法 + 3σ法，两种方法交叉验证）
+- 数据类型检查（有没有应该是数值但存储为字符串的列？有没有疑似ID列被当成特征？）
+- 重复行检测（完全重复行数量和比例）
+
+### 2. 目标变量分析
+- 分布图（直方图 + KDE），判断是否需要变换（对数/Box-Cox）
+- Q-Q图（检验正态性，附Shapiro-Wilk检验p值）
+- 如果是时间序列：ACF图 + PACF图 + STL季节性分解图
+
+### 3. 特征关系分析
+- 相关矩阵热力图（数值特征，标注|r|>0.7的强相关对）
+- 关键特征与目标变量的散点图（前5个最相关特征）
+- 多重共线性检测（VIF > 10 的特征需要标记）
+
+### 4. 数据摘要表
+输出一个 DataFrame，包含：n, mean, std, min, 25%, 50%, 75%, max, null_count, null_pct
+
+## 输出要求
+
+EDA完成后，必须用 print 输出关键发现汇总：
+
+```python
+print("=" * 60)
+print("【EDA 结果汇总】")
+print(f"  数据维度: {{df.shape[0]}} 行 × {{df.shape[1]}} 列")
+print(f"  缺失列: {{missing_cols}} (最高缺失率 {{max_missing:.1%}})")
+print(f"  异常值: IQR法 {{iqr_count}} 个, 3σ法 {{zscore_count}} 个")
+print(f"  目标变量: 均值={{y.mean():.4f}}, 标准差={{y.std():.4f}}, 偏度={{y.skew():.4f}}")
+print(f"  强相关对: {{strong_corr_pairs}}")
+print(f"  关键发现: ...")
+print("=" * 60)
 ```
+
+## 数据泄露防范
+- 时序特征：用 shift(1) 获取上一期，禁止 shift(-1)
+- 滚动特征：rolling(w).mean().shift(1) 排除当期
+- 标准化：只用训练集 fit，测试集 transform
+
+## 物理/力学机理题特殊处理
+如果题目是物理/力学机理题（参数为确定常量），不要画直方图、箱线图或提「异常值清洗」。
+EDA 聚焦于：打印关键参数表格 → 几何关系计算 → 量纲验证 → 物理一致性检查。
 """
+
+_MODELING_PHASE_PROMPT = """
+你是数学建模竞赛团队的编码专家，当前处于 **阶段二：模型实现**。
+
+基于 model_spec（由 ModelerAgent 提供）实现模型。
+
+## model_spec 内容
+{model_spec}
+
+## 代码质量规范
+1. 每个函数必须有 docstring，说明输入、输出、副作用
+2. 所有随机操作必须设置随机种子（np.random.seed(42), random.seed(42)）
+3. 所有文件路径使用 Path 对象，不使用字符串拼接
+4. 所有中间结果保存到 work_dir，文件名包含描述性标签
+
+## 图表质量规范
+```python
+import matplotlib
+matplotlib.rcParams.update({{
+    'font.family': ['SimHei', 'DejaVu Sans'],
+    'axes.unicode_minus': False,
+    'font.size': 12,
+    'axes.titlesize': 14,
+    'figure.dpi': 150,
+    'savefig.dpi': 300,
+    'figure.figsize': (10, 6),
+    'axes.spines.top': False,
+    'axes.spines.right': False
+}})
+COLOR_PALETTE = ['#2E4057', '#048A81', '#54C6EB', '#EF6F6C', '#F5A623']
+```
+
+每张图必须包含：
+- 标题（说明图表主要结论，不是"图1"这种无意义标题）
+- 坐标轴标签 + 单位
+- 图例（如果有多条线）
+- 数据量注释（"基于n=XXX个样本"）
+
+## 严格禁止
+- 3D饼图、纯饼图（>5类）、没有误差棒的柱状图
+
+## model_spec 必须遵循
+严格按 model_spec 中的算法、超参数、输入输出规范实现。
+如果 model_spec 中指定了 validation_method，必须在本阶段同步执行。
+
+## 每张图绑图代码后必须用 print 输出关键数据特征
+因为 Agent 无法"看到"图片，只能看到文本输出。
+"""
+
+_VALIDATION_PHASE_PROMPT = """
+你是数学建模竞赛团队的编码专家，当前处于 **阶段三：结果验证**。
+
+模型实现完成后，必须执行以下验证，确保结果真实有效，不存在数据泄露或过拟合。
+
+## 必须执行的验证
+
+### 1. 交叉验证
+- 回归/时间序列：滚动交叉验证，至少5折
+- 分类：分层K折，至少5折
+- 必须报告：mean ± std，而不只是单次结果
+
+### 2. 基线对比
+每个模型必须与至少一个基线对比：
+- 回归：线性回归基线
+- 时间序列：Naive预测（用最后观测值）或季节性Naive
+- 分类：多数类基线
+
+### 3. 过拟合检查
+- 训练集表现 vs 验证集表现的差值
+- 如果差值 > 20%，标记为过拟合风险，必须在论文中说明
+
+### 4. 结果报告格式
+```python
+print("=" * 60)
+print("【结果验证报告】")
+print()
+print("| 方法 | MAE | MAPE | 95%CI覆盖率 |")
+print("|------|-----|------|------------|")
+print(f"| 基线（{{baseline_name}}) | {{baseline_mae:.4f}} | {{baseline_mape:.2%}} | - |")
+print(f"| 我们的方法 | {{our_mae:.4f}} | {{our_mape:.2%}} | {{coverage:.2%}} |")
+print(f"| 提升量 | {{(baseline_mae-our_mae)/baseline_mae*100:.1f}}% | {{(baseline_mape-our_mape)/baseline_mape*100:.1f}}% | - |")
+print()
+print(f"  过拟合检查: 训练集 {{train_score:.4f}} vs 验证集 {{val_score:.4f}}, 差值 {{abs(train_score-val_score):.4f}}")
+print(f"  过拟合风险: {{'高（需在论文中说明）' if abs(train_score-val_score)/val_score > 0.2 else '低'}}")
+print("=" * 60)
+```
+
+## 禁止事项
+- 不得只报告单次结果而不做交叉验证
+- 不得声称精度100%或R²>0.99而不检查数据泄露
+- 不得省略基线对比
+"""
+
+
+def get_coder_prompt_for_phase(phase: str, model_spec: str = "") -> str:
+    """获取指定阶段的 CoderAgent 系统提示词。
+
+    将完整的三阶段流程拆分为独立调用，使 CoderAgent 可以按阶段执行，
+    每个阶段只接收当前需要的指令，避免上下文过长。
+
+    Args:
+        phase: 阶段标识，可选值：
+            - "eda": 探索性数据分析阶段
+            - "modeling": 模型实现阶段（需提供 model_spec）
+            - "validation": 结果验证阶段
+        model_spec: ModelerAgent 输出的模型规格 JSON 字符串，
+            仅在 phase="modeling" 时注入到提示词中。
+
+    Returns:
+        对应阶段的系统提示词。
+
+    Raises:
+        ValueError: phase 不在允许的取值范围内。
+    """
+    valid_phases = ("eda", "modeling", "validation")
+    if phase not in valid_phases:
+        raise ValueError(
+            f"未知的阶段标识: '{phase}'，可选值为 {valid_phases}"
+        )
+
+    if phase == "eda":
+        return _EDA_PHASE_PROMPT.strip()
+
+    if phase == "modeling":
+        spec_section = model_spec if model_spec else "（未提供 model_spec，请根据 EDA 结果自行选择合适方法）"
+        return _MODELING_PHASE_PROMPT.format(model_spec=spec_section).strip()
+
+    # phase == "validation"
+    return _VALIDATION_PHASE_PROMPT.strip()

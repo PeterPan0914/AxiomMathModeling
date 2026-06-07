@@ -23,6 +23,12 @@ class AgentType(str, Enum):
     WRITER = "WriterAgent"
     REVIEWER = "ReviewAgent"
     SYSTEM = "SystemAgent"
+    PROBLEM_ANALYST = "problem_analyst"
+    DATA_SANITY = "data_sanity"
+    CRITIC = "critic"
+    LITERATURE = "literature"
+    OUTLINE = "outline"
+    CONSISTENCY = "consistency"
 
 
 class AgentStatus(str, Enum):
