@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     WRITER_CONTEXT_WINDOW: int = 128000
 
     MAX_CHAT_TURNS: int | None = None
-    MAX_RETRIES: int | None = None
+    MAX_RETRIES: int | None = 15
     E2B_API_KEY: Optional[str] = None
     LOG_LEVEL: str = "DEBUG"
     DEBUG: bool = True
