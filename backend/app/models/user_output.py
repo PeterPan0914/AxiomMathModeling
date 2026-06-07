@@ -141,7 +141,7 @@ class UserOutput:
             uuid_list = re.findall(r"\[([a-f0-9-]{36})\]", text)
             for uid in uuid_list:
                 text = text.replace(f"[{uid}]", f"[^{ref_index}]")
-                if self.footnotes[uid].get("number") is None:
+                if uid in self.footnotes and self.footnotes[uid].get("number") is None:
                     self.footnotes[uid]["number"] = ref_index
 
                 ref_index += 1
@@ -162,7 +162,9 @@ class UserOutput:
         """
         text += "\n\n ## 参考文献"
         # 将脚注转换为列表并按 number 排序
-        sorted_footnotes = sorted(self.footnotes.items(), key=lambda x: x[1]["number"])
+        sorted_footnotes = sorted(
+            self.footnotes.items(), key=lambda x: x[1].get("number", 0)
+        )
         for _, footnote in sorted_footnotes:
             text += f"\n\n[^{footnote['number']}]: {footnote['content']}"
         return text
