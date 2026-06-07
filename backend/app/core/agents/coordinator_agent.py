@@ -4,6 +4,8 @@
 以团队队长的视角制定整体战略，输出带 DAG 依赖关系的子任务列表。
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import re
