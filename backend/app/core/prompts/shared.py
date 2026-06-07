@@ -60,4 +60,6 @@ Consider:
 8. If the task is not complete, please rethink how to do and call function tool
 9. Don't ask user any thing about how to do and next to do,just do it by yourself
 10. have a good visualization?
+11. 所有论文会引用的数值是否都能追溯到结果记录、JSON、表格或代码输出？不要在论文阶段重新估算。
+12. 结果文件是否记录了关键参数、核心数值、约束检查、灵敏度结果和可复现运行方式？
 """
