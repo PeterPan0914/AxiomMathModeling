@@ -3,6 +3,7 @@
 import asyncio
 from app.core.agents import WriterAgent, CoderAgent, CoordinatorAgent, ModelerAgent, ReviewAgent
 from app.core.evaluation import QualityScore, QualityReport, QualityTracker
+from app.core.structure_control import StructureController, SectionStatus
 from app.schemas.request import Problem
 from app.schemas.response import SystemMessage
 from app.tools.openalex_scholar import OpenAlexScholar
@@ -69,6 +70,7 @@ class MathModelWorkFlow(WorkFlow):
         # 初始化诊断日志和质量跟踪器（实例级别，避免多任务污染）
         diag = DiagnosticLogger(self.work_dir)
         quality_tracker = QualityTracker()
+        structure_controller = StructureController()
         diag.save_workflow_config({
             "task_id": self.task_id,
             "comp_template": problem.comp_template.value if hasattr(problem.comp_template, 'value') else str(problem.comp_template),
@@ -299,6 +301,37 @@ class MathModelWorkFlow(WorkFlow):
                 )
 
                 user_output.set_res(key, writer_response)
+
+                # 结构控制：检查章节篇幅
+                section_report = structure_controller.check_section(
+                    key, writer_response.response_content
+                )
+                if section_report.status == SectionStatus.TOO_SHORT:
+                    warn_msg = (
+                        f"章节「{section_report.section_name}」篇幅不足 "
+                        f"({section_report.char_count}字, "
+                        f"目标{section_report.target_min}-{section_report.target_max}字)。"
+                        f"{section_report.feedback}"
+                    )
+                    logger.warning(f"[结构控制] {warn_msg}")
+                    await redis_manager.publish_message(
+                        self.task_id,
+                        SystemMessage(content=warn_msg, type="warning"),
+                    )
+                elif section_report.status == SectionStatus.TOO_LONG:
+                    warn_msg = (
+                        f"章节「{section_report.section_name}」篇幅超出 "
+                        f"({section_report.char_count}字, "
+                        f"目标{section_report.target_min}-{section_report.target_max}字)。"
+                    )
+                    logger.warning(f"[结构控制] {warn_msg}")
+
+                # 记录去重和质量问题
+                for issue in section_report.redundancy_issues:
+                    logger.warning(f"[结构控制-去重] {section_report.section_name}: {issue}")
+                for issue in section_report.quality_issues:
+                    logger.warning(f"[结构控制-质量] {section_report.section_name}: {issue}")
+
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -321,6 +354,49 @@ class MathModelWorkFlow(WorkFlow):
             )
 
         logger.info(user_output.get_res())
+
+        # 全文结构控制检查
+        all_sections = {
+            key: val.get("response_content", "")
+            for key, val in user_output.get_res().items()
+        }
+        paper_report = structure_controller.check_full_paper(all_sections)
+
+        # 发送结构报告
+        if paper_report.overall_feedback:
+            logger.info(f"[结构控制] 全文报告:\n{paper_report.overall_feedback}")
+            await redis_manager.publish_message(
+                self.task_id,
+                SystemMessage(
+                    content=f"论文结构检测完成:\n{paper_report.overall_feedback}",
+                    type="info",
+                ),
+            )
+
+        # 记录全局去重问题
+        for issue in paper_report.global_issues:
+            logger.warning(f"[结构控制-全局去重] {issue}")
+
+        # 保存结构控制报告到诊断数据
+        diag.save_structure_report({
+            "total_chars": paper_report.total_chars,
+            "target_length": paper_report.target_length,
+            "ratio": paper_report.total_chars / paper_report.target_length,
+            "sections": [
+                {
+                    "name": r.section_name,
+                    "key": r.key,
+                    "char_count": r.char_count,
+                    "target_min": r.target_min,
+                    "target_max": r.target_max,
+                    "status": r.status.value,
+                    "quality_issues": r.quality_issues,
+                    "redundancy_issues": r.redundancy_issues,
+                }
+                for r in paper_report.section_reports
+            ],
+            "global_issues": paper_report.global_issues,
+        })
 
         # 打印质量跟踪摘要
         quality_tracker.print_summary()

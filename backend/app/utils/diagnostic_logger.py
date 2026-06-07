@@ -121,3 +121,16 @@ class DiagnosticLogger:
                 json.dump(config, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"配置信息写入失败: {e}")
+
+    def save_structure_report(self, report: dict) -> None:
+        """保存结构控制报告到 JSON 文件。
+
+        Args:
+            report: StructureController.check_full_paper() 的序列化输出。
+        """
+        path = os.path.join(self.diag_dir, "structure_report.json")
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(report, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"结构报告写入失败: {e}")

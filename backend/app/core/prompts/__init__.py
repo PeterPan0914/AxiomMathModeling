@@ -12,6 +12,9 @@ from app.core.prompts.prompt_engineering import (
     get_academic_writing_prompt,
     get_sensitivity_analysis_prompt,
     get_model_validation_prompt,
+    get_modeler_cot_prompt,
+    get_writer_cot_prompt,
+    get_coder_cot_prompt,
 )
 
 __all__ = [
@@ -30,4 +33,7 @@ __all__ = [
     "get_academic_writing_prompt",
     "get_sensitivity_analysis_prompt",
     "get_model_validation_prompt",
+    "get_modeler_cot_prompt",
+    "get_writer_cot_prompt",
+    "get_coder_cot_prompt",
 ]
