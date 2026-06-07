@@ -306,9 +306,9 @@ class Flows:
 【代码执行输出】
 {code_output}
 
-{sc.get_section_length_hint(key)}
+{self.structure_controller.get_section_length_hint(key)}
 
-{sc.get_anti_redundancy_hint(key)}
+{self.structure_controller.get_anti_redundancy_hint(key)}
 
 【写作要求】
 1. 问题分析与模型选择：300-500字，说明问题类型、难点和模型选择论证
@@ -339,9 +339,9 @@ class Flows:
 【代码执行输出】
 {code_output}
 
-{sc.get_section_length_hint("eda")}
+{self.structure_controller.get_section_length_hint("eda")}
 
-{sc.get_anti_redundancy_hint("eda")}
+{self.structure_controller.get_anti_redundancy_hint("eda")}
 
 【写作要求】
 1. 数据基本情况（200-300字）：来源、时间范围、变量个数、样本量、数据背景
@@ -370,9 +370,9 @@ class Flows:
 【代码执行输出】
 {code_output}
 
-{sc.get_section_length_hint("sensitivity_analysis")}
+{self.structure_controller.get_section_length_hint("sensitivity_analysis")}
 
-{sc.get_anti_redundancy_hint("sensitivity_analysis")}
+{self.structure_controller.get_anti_redundancy_hint("sensitivity_analysis")}
 
 【写作要求】
 1. 参数灵敏度分析（200-300字）：使用模型拟合的置信区间（非任意±10%），报告灵敏度指数排名，分析交互效应，引用龙卷风图和热力图
