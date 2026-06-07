@@ -541,16 +541,45 @@ class MathModelWorkFlow(WorkFlow):
                         for issue in critique_result.issues:
                             logger.warning(f"  - [{issue.get('severity')}] {issue.get('issue', '')[:100]}")
 
-                        # 将质疑建议注入下一轮写作的反馈中
+                        # reject 时注入反馈并重新写作（最多重试 1 次）
                         if critique_result.decision == "reject":
-                            logger.warning(f"[CriticAgent] {key}: 致命问题，建议重新写作")
+                            logger.warning(f"[CriticAgent] {key}: 致命问题，启动重写")
                             await redis_manager.publish_message(
                                 self.task_id,
                                 SystemMessage(
-                                    content=f"CriticAgent 对 {key} 提出严重质疑，建议重新写作",
+                                    content=f"CriticAgent 对 {key} 提出严重质疑，正在重新写作...",
                                     type="warning",
                                 ),
                             )
+
+                            # 构造带反馈的重写提示
+                            issues_text = "\n".join(
+                                f"- [{it.get('severity')}] {it.get('issue', '')}"
+                                for it in critique_result.issues
+                            )
+                            rewrite_prompt = f"""请根据以下评审反馈重新撰写本章节。
+
+【原始任务】
+{writer_prompt}
+
+【评审反馈（致命问题）】
+{issues_text}
+
+【修改要求】
+1. 重点解决评审中指出的所有问题
+2. 保持论文的整体结构和格式
+3. 确保内容准确、逻辑自洽
+
+请输出完整的修改后内容。"""
+
+                            writer_response = await writer_agent.run(
+                                rewrite_prompt,
+                                available_images=coder_response.created_images,
+                                sub_title=f"{key} (重写)",
+                            )
+                            user_output.set_res(key, writer_response)
+                            global_state.extract_from_writer_response(writer_response.response_content)
+                            logger.info(f"[CriticAgent] {key}: 重写完成")
                 except Exception as e:
                     logger.warning(f"Phase 5d: CriticAgent 质疑失败（不影响流程）: {e}")
 
