@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 # 每个字符估算的 token 数（中英混合文本的保守估计）
 _CHARS_PER_TOKEN = 3
 # 触发压缩的 token 占比阈值（相对 context_window）
-_DEFAULT_TOKEN_THRESHOLD_RATIO = 0.75
+_DEFAULT_TOKEN_THRESHOLD_RATIO = 0.65
 
 
 class Agent:
@@ -48,14 +48,24 @@ class Agent:
         return self._estimate_tokens(content) + 4
 
     async def _chat(self, **kwargs) -> Any:
-        """调用 LLM 模型，支持取消中断。
+        """调用 LLM 模型，支持取消中断和调用前上下文检查。
 
         将所有关键字参数透传给 self.model.chat()。
         若设置了 cancel_event，则通过 asyncio.wait 实现可中断等待。
+        调用前检查上下文大小，超过 85% 阈值时主动压缩。
 
         Returns:
             模型响应对象。
         """
+        # 调用前主动压缩：如果当前 token 超过 85% 阈值，先压缩再调用
+        pre_call_threshold = int(self.context_window * 0.85)
+        if self.current_token_count > pre_call_threshold:
+            logger.info(
+                f"{self.__class__.__name__}:调用前主动压缩，"
+                f"当前 token ~{self.current_token_count}，阈值 {pre_call_threshold}"
+            )
+            await self.compress_if_needed()
+
         if not self.cancel_event:
             return await self.model.chat(**kwargs)
 
@@ -317,12 +327,20 @@ class Agent:
         return safe_history
 
     def _format_history_for_summary(self, history: list[dict]) -> str:
-        """格式化历史记录用于总结。"""
+        """格式化历史记录用于总结。
+
+        对 tool 消息保留首尾各 500 字符，其他消息保留 2000 字符，
+        确保总结 LLM 能看到关键代码和错误信息。
+        """
         formatted = []
         for msg in history:
             role = msg["role"]
             content = msg.get("content") or ""
-            if len(content) > 500:
-                content = content[:500] + "..."
+            if role == "tool":
+                # tool 输出：保留首尾各 500 字符
+                if len(content) > 1200:
+                    content = content[:500] + f"\n... (省略 {len(content) - 1000} 字符) ...\n" + content[-500:]
+            elif len(content) > 2000:
+                content = content[:2000] + "..."
             formatted.append(f"{role}: {content}")
         return "\n".join(formatted)

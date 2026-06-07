@@ -81,6 +81,8 @@ class LLM:
         messages = history or []
 
         attempt = 0
+        max_retry_time = 300  # 总重试时间上限（秒）
+        retry_start = time.time()
         while True:
             try:
                 response = await self.provider.call(
@@ -100,17 +102,28 @@ class LLM:
             except Exception as e:
                 attempt += 1
                 error_str = str(e)
+                elapsed = time.time() - retry_start
                 # 不可恢复的错误（400 参数错误、模型不支持等），立即抛出不重试
                 if "400" in error_str or "Not supported model" in error_str:
                     logger.error(f"不可恢复的错误，停止重试: {error_str}")
                     raise
-                logger.error(f"第{attempt}次重试: {error_str}")
                 # 限制最大重试次数，防止无限循环
-                effective_max = max_retries if max_retries is not None else 10
+                effective_max = max_retries if max_retries is not None else 5
                 if attempt >= effective_max:
                     logger.error(f"达到最大重试次数 {effective_max}，放弃")
                     raise
-                time.sleep(retry_delay * min(attempt, 10))
+                # 总超时保护
+                if elapsed >= max_retry_time:
+                    logger.error(f"重试总耗时 {elapsed:.0f}s 超过上限 {max_retry_time}s，放弃")
+                    raise
+                # 指数退避，连接错误用更长退避
+                is_connection_error = any(
+                    kw in error_str for kw in ("Connection", "timeout", "超时", "connect")
+                )
+                base_delay = retry_delay * (3 if is_connection_error else 1)
+                sleep_time = min(base_delay * (2 ** (attempt - 1)), 60)
+                logger.error(f"第{attempt}次重试 ({'连接错误' if is_connection_error else '其他错误'}): {error_str}，等待 {sleep_time:.0f}s")
+                time.sleep(sleep_time)
 
     def _validate_and_fix_tool_calls(self, history: list) -> list:
         """验证并修复工具调用完整性。"""
