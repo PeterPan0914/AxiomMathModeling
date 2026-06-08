@@ -10,6 +10,14 @@ from .outline_agent import OutlineAgent
 from .consistency_agent import ConsistencyAgent
 from .problem_analyst_agent import ProblemAnalystAgent
 
+# Phase 2 新增 Agents
+from .dependency_agent import DependencyAgent
+from .problem_type_agent import ProblemTypeAgent
+from .problem_reformulation_agent import ProblemReformulationAgent
+from .model_search_agent import ModelSearchAgent
+from .reviewer_agent import ReviewerAgent
+from .award_judge_agent import AwardJudgeAgent
+
 __all__ = [
     "CoderAgent",
     "WriterAgent",
@@ -23,4 +31,11 @@ __all__ = [
     "OutlineAgent",
     "ConsistencyAgent",
     "ProblemAnalystAgent",
+    # Phase 2 新增
+    "DependencyAgent",
+    "ProblemTypeAgent",
+    "ProblemReformulationAgent",
+    "ModelSearchAgent",
+    "ReviewerAgent",
+    "AwardJudgeAgent",
 ]
