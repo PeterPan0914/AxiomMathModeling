@@ -871,3 +871,169 @@ def get_coder_prompt_for_phase(phase: str, model_spec: str = "") -> str:
 
     # phase == "validation"
     return _VALIDATION_PHASE_PROMPT.strip()
+
+
+# =============================================================================
+# 专家模板注入（根据问题类型自动选择）
+# =============================================================================
+
+# --- GPR 模板（稀疏纵向数据时注入） ---
+GPR_TEMPLATE = """
+# === GPR 高斯过程回归模板（适用于稀疏纵向数据） ===
+# 使用条件：每个个体平均仅 1-3 次观测，LMM 外推误差大
+# GPR 的优势：输出后验概率分布 + 置信区间，能量化预测不确定性
+
+import numpy as np
+import pandas as pd
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import RBF, Matern, WhiteKernel, ConstantKernel
+import matplotlib.pyplot as plt
+
+def fit_gpr_for_subject(t_obs, y_obs):
+    \"\"\"为单个个体拟合 GPR 模型。
+
+    Args:
+        t_obs: 观测时间点数组 (n_obs,)
+        y_obs: 观测值数组 (n_obs,)
+
+    Returns:
+        (gpr_model, t_pred, y_mean, y_std)
+    \"\"\"
+    kernel = ConstantKernel(1.0) * Matern(length_scale=5.0, nu=2.5) + WhiteKernel(noise_level=1e-3)
+    gpr = GaussianProcessRegressor(kernel=kernel, n_restarts_optimizer=10, normalize_y=True, random_state=42)
+    gpr.fit(t_obs.reshape(-1, 1), y_obs)
+
+    t_pred = np.linspace(t_obs.min(), max(t_obs.max(), 40), 300)
+    y_mean, y_std = gpr.predict(t_pred.reshape(-1, 1), return_std=True)
+    return gpr, t_pred, y_mean, y_std
+
+def predict_t_attain_95ci(t_pred, y_mean, y_std, threshold=0.04):
+    \"\"\"使用 95% 置信下界预测达标时间（保守估计）。\"\"\"
+    lower_bound = y_mean - 1.96 * y_std
+    above = np.where(lower_bound >= threshold)[0]
+    if len(above) > 0:
+        return t_pred[above[0]]
+    return np.inf  # 未达标
+
+# 使用示例：
+# for subj_id in df['subject_id'].unique():
+#     subj_data = df[df['subject_id'] == subj_id]
+#     gpr, t_pred, y_mean, y_std = fit_gpr_for_subject(
+#         subj_data['week'].values, subj_data['y_concentration'].values
+#     )
+#     t_attain = predict_t_attain_95ci(t_pred, y_mean, y_std, threshold=0.04)
+"""
+
+# --- 生存分析模板（存在删失数据时注入） ---
+SURVIVAL_TEMPLATE = """
+# === 生存分析模板（适用于 time-to-event 数据，存在删失） ===
+# 使用条件：结局变量是"事件发生时间"，部分样本在观测期内未达标（右删失）
+# 禁止用 OLS/LMM 直接回归时间（会丢弃删失样本，产生有偏估计）
+
+import numpy as np
+import pandas as pd
+from lifelines import KaplanMeierFitter, CoxPHFitter
+from lifelines.statistics import logrank_test
+import matplotlib.pyplot as plt
+
+# --- Kaplan-Meier 非参数生存曲线 ---
+def kaplan_meier_analysis(df, duration_col='T', event_col='E', group_col=None):
+    \"\"\"Kaplan-Meier 生存分析。\"\"\"
+    fig, ax = plt.subplots(figsize=(8, 5))
+    kmf = KaplanMeierFitter()
+
+    if group_col is None:
+        kmf.fit(df[duration_col], event_observed=df[event_col])
+        kmf.plot_survival_function(ax=ax)
+        median_surv = kmf.median_survival_time_
+        print(f"  中位生存时间: {median_surv:.1f}")
+    else:
+        for group in df[group_col].unique():
+            mask = df[group_col] == group
+            kmf.fit(df.loc[mask, duration_col], event_observed=df.loc[mask, event_col], label=str(group))
+            kmf.plot_survival_function(ax=ax)
+
+    ax.set_xlabel('时间')
+    ax.set_ylabel('生存概率 S(t)')
+    ax.set_title('Kaplan-Meier 生存曲线')
+    plt.tight_layout()
+    plt.savefig('km_curve.png', dpi=300)
+    plt.show()
+
+# --- Cox 比例风险模型 ---
+def cox_ph_analysis(df, duration_col='T', event_col='E', feature_cols=None):
+    \"\"\"Cox PH 模型，分析协变量对风险率的影响。\"\"\"
+    cph = CoxPHFitter(penalizer=0.01)
+    cox_df = df[[duration_col, event_col] + feature_cols].dropna()
+    cph.fit(cox_df, duration_col=duration_col, event_col=event_col)
+    cph.print_summary()
+    print(f"  Concordance Index: {cph.concordance_index_:.4f}")
+    return cph
+
+# 使用示例：
+# kaplan_meier_analysis(df, duration_col='week', event_col='attained', group_col='bmi_group')
+# cph = cox_ph_analysis(df, duration_col='week', event_col='attained', feature_cols=['bmi', 'age'])
+"""
+
+# --- 联合优化模板（存在耦合决策变量时注入） ---
+JOINT_OPTIMIZATION_TEMPLATE = """
+# === 联合优化模板（适用于分组边界+组内参数耦合的优化问题） ===
+# 使用条件：BMI分界点改变 → 各组数据分布改变 → 最优参数也必须同步改变
+# 禁止使用"先聚类后独立优化"的两步法（忽略耦合效应）
+
+import numpy as np
+from scipy.optimize import differential_evolution
+
+def joint_optimization(df, k=3, n_bootstrap=100):
+    \"\"\"联合优化 BMI 分组边界和每组最佳检测时点。
+
+    Args:
+        df: DataFrame，包含 bmi 和 t_attain 列
+        k: 分组数
+        n_bootstrap: Bootstrap 重采样次数
+
+    Returns:
+        (optimal_boundaries, optimal_times, total_risk)
+    \"\"\"
+    bmi_min, bmi_max = df['bmi'].min(), df['bmi'].max()
+
+    def objective(params):
+        boundaries = np.sort(params[:k-1])
+        times = params[k-1:]
+        total_risk = 0
+        for g in range(k):
+            lower = boundaries[g-1] if g > 0 else bmi_min
+            upper = boundaries[g] if g < k-1 else bmi_max
+            group = df[(df['bmi'] >= lower) & (df['bmi'] < upper)]
+            if len(group) == 0:
+                return 1e12  # 惩罚空组
+            # 风险函数：未达标比例 + 检测过早的惩罚
+            t_opt = times[g]
+            not_attained = (group['t_attain'] > t_opt).mean()
+            risk = not_attained * 10 + max(0, 12 - t_opt) * 0.5  # 12周前检测有额外风险
+            total_risk += len(group) * risk
+        return total_risk
+
+    bounds = [(bmi_min + 1, bmi_max - 1)] * (k - 1) + [(10, 25)] * k
+    result = differential_evolution(objective, bounds, maxiter=500, seed=42, popsize=15, tol=1e-6)
+
+    optimal_boundaries = np.sort(result.x[:k-1])
+    optimal_times = result.x[k-1:]
+    return optimal_boundaries, optimal_times, result.fun
+
+# 多场景分析（不同准确率要求下的最优策略）
+def multi_scenario_analysis(df, accuracies=[0.50, 0.75, 0.90, 0.99], k=3):
+    \"\"\"对不同准确率要求分别求解最优策略。\"\"\"
+    results = []
+    for acc in accuracies:
+        # 修改目标函数中的达标比例约束
+        boundaries, times, risk = joint_optimization(df, k=k)
+        results.append({
+            'accuracy': acc,
+            'boundaries': boundaries.tolist(),
+            'times': times.tolist(),
+            'risk': risk,
+        })
+        print(f"  准确率{acc:.0%}: 边界={boundaries}, 时点={times}, 风险={risk:.2f}")
+    return results
+"""

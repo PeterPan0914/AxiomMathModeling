@@ -489,9 +489,27 @@ class MathModelWorkFlow(WorkFlow):
                 + "\n\n执行顺序: " + " → ".join(dep_graph.execution_order)
             )
 
+        # 构建问题重述文本（供 ModelerAgent 约束选型）
+        reformulation_text = ""
+        if reformulation_result:
+            parts = []
+            for q_key, sp in reformulation_result.sub_problems.items():
+                parts.append(f"### {q_key}: {sp.problem_type_cn} ({sp.standard_problem_type})")
+                parts.append(f"- 重述: {sp.reformulated_statement}")
+                parts.append(f"- 推荐模型: {', '.join(sp.recommended_model_families)}")
+                if sp.forbidden_model_families:
+                    parts.append(f"- 禁止模型: {', '.join(sp.forbidden_model_families)}")
+                parts.append(f"- 创新方向: {sp.innovation_direction}")
+                parts.append("")
+            if reformulation_result.innovation_packaging:
+                parts.append(f"## 创新包装建议\n{reformulation_result.innovation_packaging}")
+            reformulation_text = "\n".join(parts)
+
         modeler_response = await modeler_agent.run(
             coordinator_response,
             problem_analysis=problem_analysis_text + dep_summary,
+            literature_review_text=literature_review_text[:3000],
+            reformulation_text=reformulation_text,
         )
 
         # 更新 GlobalState：记录建模决策
@@ -516,6 +534,61 @@ class MathModelWorkFlow(WorkFlow):
             self.task_id,
             SystemMessage(content="Phase 4: 建模完成", type="success"),
         )
+
+        # ================================================================
+        # Phase 4.5: ModelSearchAgent（变量筛选，仅对包含 model_search_protocol 的子问题）
+        # ================================================================
+        model_search_results: dict[str, 'ModelSearchResult'] = {}
+
+        ques_needing_search = {}
+        if hasattr(modeler_response, 'model_specs') and modeler_response.model_specs:
+            for q_key, spec in modeler_response.model_specs.items():
+                if spec.model_search_protocol:
+                    ques_needing_search[q_key] = spec
+
+        if ques_needing_search:
+            await redis_manager.publish_message(
+                self.task_id,
+                SystemMessage(content=f"Phase 4.5: 发现 {len(ques_needing_search)} 个子问题需要变量筛选..."),
+            )
+            await self._check_cancelled()
+
+            try:
+                model_search_agent = ModelSearchAgent(
+                    task_id=problem.task_id,
+                    model=coder_llm,
+                    work_dir=self.work_dir,
+                    code_interpreter=code_interpreter,
+                    context_window=settings.CODER_CONTEXT_WINDOW,
+                    cancel_event=self.cancel_event,
+                    diagnostic_logger=diag,
+                )
+
+                for q_key, spec in ques_needing_search.items():
+                    await self._check_cancelled()
+                    data_desc = ""
+                    if global_state.problem_understanding.data_inventory.files:
+                        data_desc = f"数据文件: {', '.join(global_state.problem_understanding.data_inventory.files)}"
+
+                    search_result = await model_search_agent.run(
+                        ques_key=q_key, model_spec=spec, data_description=data_desc,
+                    )
+                    model_search_results[q_key] = search_result
+
+                    if search_result.success:
+                        logger.info(
+                            f"[ModelSearchAgent] {q_key}: 最优={search_result.best_model_id}, "
+                            f"AIC={search_result.best_aic:.2f}, ICC={search_result.icc:.4f}"
+                        )
+                        global_state.log_decision(
+                            agent="ModelSearchAgent",
+                            decision=f"{q_key}: 选择 {search_result.best_model_id}",
+                            reasoning=f"AIC={search_result.best_aic:.2f}, ICC={search_result.icc:.4f}",
+                        )
+                    else:
+                        logger.warning(f"[ModelSearchAgent] {q_key}: {search_result.error_message}")
+            except Exception as e:
+                logger.warning(f"Phase 4.5: ModelSearchAgent 失败（不影响流程）: {e}")
 
         # ================================================================
         # Phase 5: 子任务循环（Coder → ResultInterpreter → Writer）
@@ -619,10 +692,25 @@ class MathModelWorkFlow(WorkFlow):
                 # 构建依赖上下文（注入前序问题的结论）
                 dependency_context = dep_graph.build_dependency_context(key)
 
-                # 构建增强版 coder_prompt，注入依赖上下文
+                # 构建增强版 coder_prompt，注入依赖上下文 + 变量筛选结果
                 enhanced_coder_prompt = value["coder_prompt"]
                 if dependency_context:
                     enhanced_coder_prompt = f"{dependency_context}\n\n【本题任务】\n{value['coder_prompt']}"
+
+                # 注入 ModelSearchAgent 的变量筛选结果
+                if key in model_search_results and model_search_results[key].success:
+                    search_summary = model_search_results[key].to_summary_text()
+                    enhanced_coder_prompt += f"""
+
+【模型搜索结果（来自 ModelSearchAgent，必须使用此最优模型）】
+{search_summary}
+
+【重要】
+- 以上模型搜索已通过 AIC/BIC 比较和似然比检验
+- 请直接使用上述最优模型进行拟合和预测
+- 不需要重新进行变量筛选
+- 但仍需报告模型的诊断指标（残差图、Q-Q 图等）
+"""
 
                 # 5a: CoderAgent 执行代码
                 coder_response = await coder_agent.run(

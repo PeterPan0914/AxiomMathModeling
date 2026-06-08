@@ -134,12 +134,16 @@ class ModelerAgent(Agent):
         self,
         coordinator_to_modeler: CoordinatorToModeler,
         problem_analysis: str = "",
+        literature_review_text: str = "",
+        reformulation_text: str = "",
     ) -> ModelerToCoder:
         """根据协调者拆解的问题生成建模方案。
 
         Args:
             coordinator_to_modeler: 协调者传递的结构化问题信息。
             problem_analysis: 题目深度分析结果（可选，来自 ProblemAnalystAgent）。
+            literature_review_text: 文献调研结果（可选，来自 LiteratureAgent）。
+            reformulation_text: 问题重述结果（可选，来自 ProblemReformulationAgent）。
 
         Returns:
             ModelerToCoder 对象，包含各问题的建模解决方案。
@@ -148,7 +152,11 @@ class ModelerAgent(Agent):
             ValueError: 超过最大重试次数仍无法解析。
         """
         # 根据是否有题目分析动态生成系统提示词
-        system_prompt = get_modeler_system_prompt(problem_analysis) if problem_analysis else self.system_prompt
+        system_prompt = get_modeler_system_prompt(
+            problem_analysis=problem_analysis,
+            literature_review_text=literature_review_text,
+            reformulation_text=reformulation_text,
+        )
         await self.append_chat_history(
             {"role": "system", "content": system_prompt}
         )

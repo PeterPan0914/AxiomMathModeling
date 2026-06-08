@@ -168,7 +168,7 @@ FIGURE_NARRATIVES: <每张推荐图表的三段式解读框架：观察→含义
 """
 
 
-def get_modeler_system_prompt(problem_analysis: str = "") -> str:
+def get_modeler_system_prompt(problem_analysis: str = "", literature_review_text: str = "", reformulation_text: str = "") -> str:
     """获取 ModelerAgent 的完整系统提示词（四阶段框架）。
 
     包含四阶段建模流程：
@@ -178,7 +178,9 @@ def get_modeler_system_prompt(problem_analysis: str = "") -> str:
       阶段四：双重输出（model_spec + model_narrative）
 
     Args:
-        problem_analysis: 题目深度分析结果（来自 ProblemAnalystAgent），注入上下文。
+        problem_analysis: 题目深度分析结果。
+        literature_review_text: LiteratureAgent 的文献调研结果。
+        reformulation_text: ProblemReformulationAgent 的问题重述结果。
 
     Returns:
         完整的系统提示词字符串。
@@ -201,6 +203,37 @@ def get_modeler_system_prompt(problem_analysis: str = "") -> str:
 
     if problem_analysis:
         prompt += f"\n\n---\n\n# 题目深度分析（来自 ProblemAnalystAgent，务必参考）\n\n{problem_analysis}\n"
+
+    if literature_review_text:
+        prompt += f"""
+
+---
+
+# 文献调研推荐（来自 LiteratureAgent，建模决策的核心依据）
+
+**以下文献调研结果直接决定了你应该选什么模型、做什么创新。你必须在阶段二的对比表格中引用这些信息。**
+
+{literature_review_text}
+
+## 文献驱动的建模决策要求
+
+1. **Mainstream 优先**：文献推荐的主流方法必须出现在你的候选对比表中
+2. **Innovation 必须落地**：如果文献推荐了创新方向，你必须在阶段三中论证可行性
+3. **Why 必须呼应**：你选择方法的理由必须能追溯到文献中的数据特征分析
+4. **被排除方案必须交代**：文献中提到但你排除的方案，必须标注排除原因
+"""
+
+    if reformulation_text:
+        prompt += f"""
+
+---
+
+# 问题重述结果（来自 ProblemReformulationAgent -- 你必须基于此选型！）
+
+**核心约束：你的模型选择必须与以下标准问题类型匹配。禁止选择被标记为 forbidden 的模型家族。**
+
+{reformulation_text}
+"""
 
     return prompt
 
@@ -340,6 +373,31 @@ _MODEL_SELECTION_TREE = """---
 **图论/网络流/路径规划**：明确有向/无向、权重、容量和连通性；负权边不能用 Dijkstra；最大流要满足流量守恒；TSP/VRP 要防止子回路。
 
 **机器学习/数据挖掘**：不要在测试集调参；类别不平衡要处理；特征工程要有业务含义；超参数搜索范围和交叉验证方案要与任务匹配。
+
+## 联合优化识别（关键！）
+
+当问题同时涉及"分组边界"和"每组最优参数"时，这两个变量是**耦合**的：
+- BMI分界点改变 → 各组孕妇构成改变 → 各组T_attain分布改变 → 最优检测时点改变
+- 这是**组合优化**问题，不是"先聚类后优化"的两步法问题
+
+**识别信号**：
+- "分组 + 时点同时优化"
+- "最佳组合"
+- "在哪几个点采样"
+- 离散决策变量（分几组）+ 连续决策变量（每组参数）
+
+**必须使用的联合优化方法**：遗传算法(GA) / 差分进化 / 贝叶斯优化
+**禁止**：先 K-means 聚类固定分组，再独立优化每组参数（忽略耦合效应）
+
+## 生存分析识别（关键！）
+
+当结局变量是"事件发生时间"且存在删失数据时，这是**生存分析**问题：
+- "达标时间"、"发病时间"、"存活时间"、"故障时间"
+- 部分样本在观测期内未达到终点事件（右删失）
+- 每个个体仅1-3次观测（极度稀疏）
+
+**必须使用**：Kaplan-Meier / Cox PH / DeepHit / GPR
+**禁止**：OLS/LMM 直接回归时间（丢弃删失样本，产生有偏估计）
 """
 
 # =============================================================================
