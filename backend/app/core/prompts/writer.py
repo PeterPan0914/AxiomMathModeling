@@ -95,13 +95,17 @@ CHAPTER_PROMISES_RULES = """
 # 章节承诺追踪机制（强制遵守！）
 
 ## 规则
-每章写完后，**必须**在该章末尾记录以下元数据注释（不会出现在最终论文中，供系统追踪）：
+每章写完后，**必须**在该章末尾用以下分隔标记记录元数据（系统会自动剥离，不会出现在最终论文中）：
 
 ```
-<!--PROMISES: 我们将在第X章证明Y; 我们将在第X章验证Z-->
-<!--PENDING: 发现了A问题，将在后续处理; B假设需要在第X章验证-->
-<!--REFS: fig1_correlation.png, table3_comparison, eq5_optimization-->
+~~~TRACKING_START
+PROMISES: 我们将在第X章证明Y; 我们将在第X章验证Z
+PENDING: 发现了A问题，将在后续处理; B假设需要在第X章验证
+REFS: fig1_correlation.png, table3_comparison, eq5_optimization
+~~~TRACKING_END
 ```
+
+**禁止使用 HTML 注释格式（<!-- -->），因为会泄漏到最终论文中。**
 
 ### PROMISES（承诺）
 记录本章向读者做出的承诺——后续章节必须兑现的内容。

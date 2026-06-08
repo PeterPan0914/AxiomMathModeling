@@ -169,12 +169,26 @@ class UserOutput:
             text += f"\n\n[^{footnote['number']}]: {footnote['content']}"
         return text
 
+    def _strip_tracking_metadata(self, text: str) -> str:
+        """剥离跟踪元数据和残留的 HTML 注释。"""
+        # 剥离新格式跟踪元数据
+        text = re.sub(
+            r'~~~TRACKING_START.*?~~~TRACKING_END\s*', '', text, flags=re.DOTALL
+        )
+        # 防御性剥离所有 HTML 注释
+        text = re.sub(r'<!--.*?-->', '', text, flags=re.DOTALL)
+        # 清理多余空行
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        return text.strip()
+
     def get_result_to_save(self) -> str:
         """获取最终拼接的论文全文，包含引用处理和参考文献。"""
         replace_res = {}
 
         for key, value in self.res.items():
-            new_text = self.replace_references_with_uuid(value["response_content"])
+            # 先剥离跟踪元数据和 HTML 注释
+            cleaned_content = self._strip_tracking_metadata(value["response_content"])
+            new_text = self.replace_references_with_uuid(cleaned_content)
             replace_res[key] = {
                 "response_content": new_text,
             }
@@ -194,6 +208,19 @@ class UserOutput:
         with open(os.path.join(self.work_dir, "res.json"), "w", encoding="utf-8") as f:
             json.dump(self.res, f, ensure_ascii=False, indent=4)
 
+        full_text = self.get_result_to_save()
+
+        # 断言：最终论文中不得包含 HTML 注释
+        html_comments = re.findall(r'<!--.*?-->', full_text, re.DOTALL)
+        if html_comments:
+            from app.utils.log_util import logger
+            logger.error(
+                f"[PaperQA] 检测到 {len(html_comments)} 个 HTML 注释泄漏到论文中！"
+                f"前3个: {html_comments[:3]}"
+            )
+            # 强制剥离（最后防线）
+            full_text = re.sub(r'<!--.*?-->', '', full_text, flags=re.DOTALL)
+
         res_path = os.path.join(self.work_dir, "res.md")
         with open(res_path, "w", encoding="utf-8") as f:
-            f.write(self.get_result_to_save())
+            f.write(full_text)
