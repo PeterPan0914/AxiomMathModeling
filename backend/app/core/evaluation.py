@@ -410,5 +410,62 @@ class QualityTracker:
         logger.info("=" * 60)
 
 
+# ---------------------------------------------------------------------------
+# Checklist 评分系统（10 维布尔值检查）
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ChecklistItem:
+    """单个检查项。"""
+    id: str = ""
+    category: str = ""  # method / writing / format
+    description: str = ""
+    passed: bool = False
+    evidence: str = ""
+    severity: str = "MAJOR"  # CRITICAL / MAJOR / MINOR
+
+
+@dataclass
+class ChecklistScore:
+    """10 维布尔值 Checklist 评分。"""
+    items: list[ChecklistItem] = field(default_factory=list)
+
+    @property
+    def pass_rate(self) -> float:
+        if not self.items:
+            return 0.0
+        return sum(1 for item in self.items if item.passed) / len(self.items)
+
+    @property
+    def critical_failures(self) -> list[ChecklistItem]:
+        return [item for item in self.items
+                if not item.passed and item.severity == "CRITICAL"]
+
+    @property
+    def has_fatal(self) -> bool:
+        return len(self.critical_failures) > 0
+
+    def to_legacy_score(self) -> int:
+        """转换为百分制（兼容现有系统）。"""
+        base = self.pass_rate * 100
+        critical_penalty = len(self.critical_failures) * 15
+        return max(0, min(100, int(base - critical_penalty)))
+
+
+# 标准 Checklist 定义
+DEFAULT_CHECKLIST = [
+    ChecklistItem(id="M1", category="method", description="每个模型假设是否有统计检验支撑", severity="CRITICAL"),
+    ChecklistItem(id="M2", category="method", description="是否有至少2种不同方法族的对比表格", severity="CRITICAL"),
+    ChecklistItem(id="M3", category="method", description="公式是否正确，推导是否完整", severity="CRITICAL"),
+    ChecklistItem(id="M4", category="method", description="数值是否在合理范围（R², 残差等）", severity="MAJOR"),
+    ChecklistItem(id="M5", category="method", description="是否有六维度鲁棒性分析", severity="MAJOR"),
+    ChecklistItem(id="W1", category="writing", description="每张图表是否有三段式论证（观察→含义→处置）", severity="MAJOR"),
+    ChecklistItem(id="W2", category="writing", description="论证链是否完整，无逻辑跳跃", severity="MAJOR"),
+    ChecklistItem(id="W3", category="writing", description="是否使用学术中文，无口语化/AI味", severity="MINOR"),
+    ChecklistItem(id="F1", category="format", description="公式编号是否连续、无重复", severity="MAJOR"),
+    ChecklistItem(id="F2", category="format", description="参考文献是否存在且格式规范", severity="MINOR"),
+]
+
+
 # 全局质量跟踪器实例
 quality_tracker = QualityTracker()
