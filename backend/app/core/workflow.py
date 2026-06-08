@@ -945,15 +945,19 @@ class MathModelWorkFlow(WorkFlow):
 
                 # 记录结论到依赖图（供后续子问题使用）
                 core_conclusion = ""
-                if hasattr(interpreter_result, 'key_findings') and interpreter_result.key_findings.conclusion:
-                    core_conclusion = interpreter_result.key_findings.conclusion[:500]
-                elif coder_response.code_response:
+                key_outputs = {}
+                if 'interpreter_result' in dir() and interpreter_result is not None:
+                    if hasattr(interpreter_result, 'key_findings') and interpreter_result.key_findings.conclusion:
+                        core_conclusion = interpreter_result.key_findings.conclusion[:500]
+                    if hasattr(interpreter_result, 'key_findings'):
+                        key_outputs = getattr(interpreter_result.key_findings, 'key_numbers', {}) or {}
+                if not core_conclusion and coder_response.code_response:
                     core_conclusion = coder_response.code_response[:500]
 
                 dep_graph.record_conclusion(
                     node_id=key,
                     core_conclusion=core_conclusion,
-                    key_outputs=getattr(interpreter_result.key_findings, 'key_numbers', {}) if hasattr(interpreter_result, 'key_findings') else {},
+                    key_outputs=key_outputs,
                     conclusion_source="ResultInterpreterAgent",
                 )
 

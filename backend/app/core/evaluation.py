@@ -217,20 +217,22 @@ def verify_substantive_change(
     len_after = len(content_after)
     ratio = len_after / len_before if len_before > 0 else 1.0
 
-    if ratio < 0.5:
+    if ratio < 0.3:
         return False, f"内容大幅缩短（{ratio:.0%}），可能是删除而非改进"
 
-    if ratio > 2.0:
+    if ratio > 3.0:
         return False, f"内容大幅膨胀（{ratio:.0%}），可能是堆砌而非改进"
 
-    # 检查内容相似度（简单方法：比较行差异）
+    # 检查内容相似度（比较行差异）
     lines_before = set(content_before.split('\n'))
     lines_after = set(content_after.split('\n'))
     if lines_before and lines_after:
+        union = lines_before | lines_after
         common = lines_before & lines_after
-        diff_ratio = 1 - len(common) / max(len(lines_before), len(lines_after))
-        if diff_ratio < 0.05:
-            return False, f"内容变化仅 {diff_ratio:.1%}，属于表面修改"
+        if len(union) > 0:
+            similarity = len(common) / len(union)
+            if similarity > 0.95:
+                return False, f"内容相似度 {similarity:.1%}，属于表面修改"
 
     return True, "实质性变化"
 
