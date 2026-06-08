@@ -126,10 +126,10 @@ PROBLEM_TYPE_PROMPT = """# Role
 
 # 高频误判模式（必须警惕！）
 
-1. **"孕妇产检数据预测胎儿达标时间"** → 这是**生存分析**，不是普通回归！
-   - 结局变量是 T_attain（达标时间），是 time-to-event
-   - 部分孕妇在观测期内未达标 → 右删失
-   - 每个孕妇仅1-3次观测 → 非常稀疏
+1. **"纵向观测数据预测事件发生时间"** → 这是**生存分析**，不是普通回归！
+   - 结局变量是事件发生时间（time-to-event）
+   - 部分个体在观测期内未达到终点 → 右删失
+   - 每个个体仅1-3次观测 → 非常稀疏
    - **错误做法**：用 LMM 直接外推
    - **正确做法**：GPR 量化不确定性 + Cox/DeepHit 生存分析
 
@@ -144,9 +144,9 @@ PROBLEM_TYPE_PROMPT = """# Role
       "question_id": "ques1",
       "primary_type": "survival_analysis",
       "sub_types": ["survival_analysis", "longitudinal_regression"],
-      "key_indicators": ["结局变量是达标时间", "部分样本右删失", "每孕妇仅1-3次观测"],
+      "key_indicators": ["结局变量是事件发生时间", "部分样本右删失", "每个体仅1-3次观测"],
       "censoring_detected": true,
-      "censoring_details": "右删失，约30%的孕妇在观测期结束时仍未达标",
+      "censoring_details": "右删失，约30%的样本在观测期结束时仍未达到终点",
       "sparsity_report": {
         "observations_per_subject": 2.1,
         "total_samples": 500,

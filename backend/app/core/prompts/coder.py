@@ -907,21 +907,21 @@ def fit_gpr_for_subject(t_obs, y_obs):
     y_mean, y_std = gpr.predict(t_pred.reshape(-1, 1), return_std=True)
     return gpr, t_pred, y_mean, y_std
 
-def predict_t_attain_95ci(t_pred, y_mean, y_std, threshold=0.04):
-    \"\"\"使用 95% 置信下界预测达标时间（保守估计）。\"\"\"
+def predict_threshold_time_95ci(t_pred, y_mean, y_std, threshold):
+    \"\"\"使用 95% 置信下界预测达到阈值的时间（保守估计）。\"\"\"
     lower_bound = y_mean - 1.96 * y_std
     above = np.where(lower_bound >= threshold)[0]
     if len(above) > 0:
         return t_pred[above[0]]
-    return np.inf  # 未达标
+    return np.inf  # 未达到阈值
 
 # 使用示例：
 # for subj_id in df['subject_id'].unique():
 #     subj_data = df[df['subject_id'] == subj_id]
 #     gpr, t_pred, y_mean, y_std = fit_gpr_for_subject(
-#         subj_data['week'].values, subj_data['y_concentration'].values
+#         subj_data['time'].values, subj_data['value'].values
 #     )
-#     t_attain = predict_t_attain_95ci(t_pred, y_mean, y_std, threshold=0.04)
+#     t_reach = predict_threshold_time_95ci(t_pred, y_mean, y_std, threshold=TARGET_VALUE)
 """
 
 # --- 生存分析模板（存在删失数据时注入） ---
@@ -978,62 +978,59 @@ def cox_ph_analysis(df, duration_col='T', event_col='E', feature_cols=None):
 # --- 联合优化模板（存在耦合决策变量时注入） ---
 JOINT_OPTIMIZATION_TEMPLATE = """
 # === 联合优化模板（适用于分组边界+组内参数耦合的优化问题） ===
-# 使用条件：BMI分界点改变 → 各组数据分布改变 → 最优参数也必须同步改变
+# 使用条件：分界点改变 → 各组数据分布改变 → 最优参数也必须同步改变
 # 禁止使用"先聚类后独立优化"的两步法（忽略耦合效应）
 
 import numpy as np
 from scipy.optimize import differential_evolution
 
-def joint_optimization(df, k=3, n_bootstrap=100):
-    \"\"\"联合优化 BMI 分组边界和每组最佳检测时点。
+def joint_optimization(df, group_col, target_col, k=3):
+    \"\"\"联合优化分组边界和每组最优参数。
 
     Args:
-        df: DataFrame，包含 bmi 和 t_attain 列
+        df: DataFrame
+        group_col: 用于分组的连续变量列名
+        target_col: 目标变量列名
         k: 分组数
-        n_bootstrap: Bootstrap 重采样次数
 
     Returns:
-        (optimal_boundaries, optimal_times, total_risk)
+        (optimal_boundaries, optimal_params, total_cost)
     \"\"\"
-    bmi_min, bmi_max = df['bmi'].min(), df['bmi'].max()
+    x_min, x_max = df[group_col].min(), df[group_col].max()
 
     def objective(params):
         boundaries = np.sort(params[:k-1])
-        times = params[k-1:]
-        total_risk = 0
+        group_params = params[k-1:]
+        total_cost = 0
         for g in range(k):
-            lower = boundaries[g-1] if g > 0 else bmi_min
-            upper = boundaries[g] if g < k-1 else bmi_max
-            group = df[(df['bmi'] >= lower) & (df['bmi'] < upper)]
+            lower = boundaries[g-1] if g > 0 else x_min
+            upper = boundaries[g] if g < k-1 else x_max
+            group = df[(df[group_col] >= lower) & (df[group_col] < upper)]
             if len(group) == 0:
                 return 1e12  # 惩罚空组
-            # 风险函数：未达标比例 + 检测过早的惩罚
-            t_opt = times[g]
-            not_attained = (group['t_attain'] > t_opt).mean()
-            risk = not_attained * 10 + max(0, 12 - t_opt) * 0.5  # 12周前检测有额外风险
-            total_risk += len(group) * risk
-        return total_risk
+            # 根据具体问题定义成本函数
+            cost = compute_group_cost(group, group_params[g], target_col)
+            total_cost += len(group) * cost
+        return total_cost
 
-    bounds = [(bmi_min + 1, bmi_max - 1)] * (k - 1) + [(10, 25)] * k
+    bounds = [(x_min + 1, x_max - 1)] * (k - 1) + [(None, None)] * k
     result = differential_evolution(objective, bounds, maxiter=500, seed=42, popsize=15, tol=1e-6)
 
     optimal_boundaries = np.sort(result.x[:k-1])
-    optimal_times = result.x[k-1:]
-    return optimal_boundaries, optimal_times, result.fun
+    optimal_params = result.x[k-1:]
+    return optimal_boundaries, optimal_params, result.fun
 
-# 多场景分析（不同准确率要求下的最优策略）
-def multi_scenario_analysis(df, accuracies=[0.50, 0.75, 0.90, 0.99], k=3):
-    \"\"\"对不同准确率要求分别求解最优策略。\"\"\"
+# 多场景分析（不同约束要求下的最优策略）
+def multi_scenario_analysis(df, group_col, target_col, scenarios, k=3):
+    \"\"\"对不同约束要求分别求解最优策略。\"\"\"
     results = []
-    for acc in accuracies:
-        # 修改目标函数中的达标比例约束
-        boundaries, times, risk = joint_optimization(df, k=k)
+    for scenario in scenarios:
+        boundaries, params, cost = joint_optimization(df, group_col, target_col, k=k)
         results.append({
-            'accuracy': acc,
+            'scenario': scenario,
             'boundaries': boundaries.tolist(),
-            'times': times.tolist(),
-            'risk': risk,
+            'params': params.tolist(),
+            'cost': cost,
         })
-        print(f"  准确率{acc:.0%}: 边界={boundaries}, 时点={times}, 风险={risk:.2f}")
     return results
 """

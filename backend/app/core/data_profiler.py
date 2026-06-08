@@ -68,7 +68,7 @@ class DataProfile:
 class DataProfiler:
     """数据形态探针，对附件数据执行标准化探查。"""
 
-    TIME_KEYWORDS = {"date", "time", "年", "月", "日", "时间", "孕周", "week", "day"}
+    TIME_KEYWORDS = {"date", "time", "年", "月", "日", "时间", "week", "day", "日期", "时刻"}
     CENSOR_KEYWORDS = {"status", "censored", "event", "删失", "截断", "是否达标", "是否异常"}
 
     def __init__(self, work_dir: str):
