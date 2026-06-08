@@ -5,23 +5,27 @@ def get_literature_research_prompt(
     problem_description: str,
     competition_type: str = "国赛",
     similar_papers: str = "",
+    problem_analysis_text: str = "",
+    sub_problems_description: str = "",
 ) -> str:
-    """为 LiteratureAgent 生成文献调研 prompt。
+    """为 LiteratureAgent 生成文献调研 prompt（改造版）。
 
-    基于题目描述和竞赛类型，指导 LLM 综合分析相关文献，
-    输出结构化的文献调研结果，为 ModelerAgent 提供方法选型依据。
+    输出 Mainstream/Innovation/Why 三段结构，直接供 ModelerAgent 消费。
 
     Args:
         problem_description: 题目描述文本。
         competition_type: 竞赛类型（国赛/美赛/其他）。
-        similar_papers: 已检索到的相似论文摘要文本（来自 OpenAlex 或内置知识库）。
+        similar_papers: 已检索到的相似论文摘要文本。
+        problem_analysis_text: ProblemAnalystAgent 的分析结果。
+        sub_problems_description: CoordinatorAgent 的子问题拆解。
 
     Returns:
-        完整的系统提示词字符串，要求 LLM 以 JSON 格式输出文献调研结果。
+        完整的系统提示词字符串。
     """
     return f"""# Role
 你是一位数学建模竞赛的文献调研专家，拥有丰富的学术检索和方法论分析经验。
-你的任务是基于题目描述和相关文献，为建模团队提供系统性的方法论调研报告。
+你的核心任务不是写一份调研报告，而是为每个子问题做出**方法选型决策**。
+你的输出将直接被建模手（ModelerAgent）消费，决定使用什么模型、做什么创新。
 
 ---
 
@@ -33,98 +37,83 @@ def get_literature_research_prompt(
 ## 题目描述
 {problem_description}
 
-## 相关文献资料
-{similar_papers if similar_papers else "（未提供外部文献，请基于你的学术知识进行分析）"}
+## 题目深度分析（来自 ProblemAnalystAgent）
+{problem_analysis_text if problem_analysis_text else "（未提供）"}
+
+## 子问题列表（来自 CoordinatorAgent）
+{sub_problems_description if sub_problems_description else "（未提供子问题拆分，请自行分析题目包含的子问题）"}
+
+## 检索到的文献
+{similar_papers if similar_papers else "（未检索到外部文献，请基于你的学术知识进行分析）"}
 
 ---
 
-# 调研任务
+# 核心任务：为每个子问题输出 Mainstream / Innovation / Why
 
-请完成以下六项分析，每项都必须给出充分的依据：
+**你必须为每个子问题（ques1, ques2, ...）分别输出以下三维分析。这是你最重要的输出，建模手会直接根据这个来选择模型。**
 
-## 1. 主流方法梳理
-分析该类问题在学术界和竞赛中最常用的方法，按使用频率排序。
-对每个方法说明：适用条件、典型精度范围、实现复杂度。
+## Mainstream（主流方法）
+- 文献中处理这类问题最常用的方法是什么？
+- 给出 2-3 条标准引用（APA 格式）
+- 这个方法的核心优势和典型精度范围
+- 在竞赛中的实际表现（获奖论文用了什么）
 
-## 2. 获奖方法偏好
-结合{competition_type}的评审标准，分析哪些方法组合最容易获奖。
-重点关注：方法的创新性、结果的可解释性、论文的论证深度。
+## Innovation（创新方向）
+- 主流方法在本题数据上的**具体不足**是什么？
+- 文献中有哪些改进方向？（不要泛泛说"可以改进"，要具体到哪种改进）
+- 给出 2-3 条支撑创新方向的文献引用
+- 这个创新在竞赛时间（72小时）内是否可行？
 
-## 3. 已知方法局限
-梳理文献中明确提到的方法局限和失败案例。
-这些局限是后续建模时必须规避的"陷阱"。
+## Why（为什么选这个）
+- 结合本题数据特征，为什么 Mainstream + Innovation 是最佳组合？
+- 被排除的备选方案有哪些？为什么排除？
+- 如果只用主流方法（不做创新），会有什么风险？
 
-## 4. 创新机会识别
-基于现有方法的局限，识别可能的创新方向。
-评估每个创新方向的可行性和难度。
+---
 
-## 5. 推荐方法方案
-综合以上分析，给出最终推荐的方法方案。
-说明推荐理由和差异化策略。
-
-## 6. 应避免的方法
-明确指出哪些方法不适合本题，以及避免的原因。
+# 全局创新策略
+在所有子问题的分析完成后，给出：
+1. 整体创新策略总结（3-5句话）
+2. 基于文献调研的论文结构建议
 
 ---
 
 # 输出规则
 
-**违反任何一条，整个输出无效，系统将要求重新生成：**
+**违反任何一条，整个输出无效：**
 
-1. 输出必须是合法 JSON（用 json.loads() 可以解析）
-2. 禁止输出 JSON 以外的任何内容（不要有 "好的，以下是..." 等前缀）
-3. 如果某个字段你认为不适用，用空数组 [] 填充
-4. 所有方法名称必须使用标准学术名称（中英文均可）
-5. "reason" 和 "limitation" 等文本字段必须给出具体依据，禁止空洞描述
+1. 输出必须是合法 JSON
+2. 禁止输出 JSON 以外的任何内容
+3. 所有引用必须使用 APA 格式
+4. 如果某个字段不适用，用空字符串或空数组填充
+5. method_recommendations 数组中必须有与子问题数量对应的条目
 
 ```json
 {{
-  "mainstream_methods": [
+  "problem_fingerprint": "问题类型指纹（如：时间序列预测+多因素回归+优化调度）",
+  "search_queries_used": ["关键词1", "关键词2"],
+  "papers_found": 0,
+  "data_source": "OpenAlex/内置知识库/混合",
+  "method_recommendations": [
     {{
-      "method": "方法名称",
-      "frequency": "高/中/低",
-      "success_rate": "在类似问题上的表现描述",
-      "applicability": "本题适用性评估",
-      "pros": ["优势1", "优势2"],
-      "cons": ["劣势1", "劣势2"]
+      "sub_problem_id": "ques1",
+      "mainstream_method": "方法名称",
+      "mainstream_description": "方法简述",
+      "mainstream_references": ["APA格式引用1", "APA格式引用2"],
+      "innovation_direction": "创新方向名称",
+      "innovation_description": "具体创新内容",
+      "innovation_references": ["APA格式引用1"],
+      "why_this_choice": "结合数据特征和文献依据的选择理由",
+      "alternatives_rejected": [
+        {{"method": "被排除方法", "reason": "排除原因"}}
+      ],
+      "risk_if_mainstream_only": "只用主流方法的风险"
     }}
   ],
-  "award_winning_methods": [
-    {{
-      "method": "方法名称",
-      "competition": "获奖竞赛",
-      "award_level": "奖项等级",
-      "key_innovation": "该方法的创新点",
-      "why_effective": "为什么这个方法能获奖"
-    }}
-  ],
-  "known_limitations": [
-    {{
-      "method": "方法名称",
-      "limitation": "具体局限描述",
-      "consequence": "不处理这个局限会导致什么后果",
-      "mitigation": "如何规避或缓解"
-    }}
-  ],
-  "innovation_opportunities": [
-    {{
-      "direction": "创新方向",
-      "reason": "为什么这是一个有价值的创新点",
-      "difficulty": "高/中/低",
-      "potential_impact": "可能带来的效果提升"
-    }}
-  ],
-  "recommended_approach": {{
-    "method": "推荐方法名称",
-    "reason": "推荐理由（必须引用前面的分析依据）",
-    "differentiation": "与主流方法的差异化策略",
-    "risk_assessment": "该方法的主要风险及应对"
-  }},
-  "methods_to_avoid": [
-    {{
-      "method": "应避免的方法",
-      "reason": "避免原因（必须具体，不能只说'不适合'）"
-    }}
+  "innovation_summary": "全局创新策略总结",
+  "paper_structure_hint": "基于文献调研的论文结构建议",
+  "citation_bib": [
+    {{"index": "1", "apa": "完整APA引用"}}
   ]
 }}
 ```"""
