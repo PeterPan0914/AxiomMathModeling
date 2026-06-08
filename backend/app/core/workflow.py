@@ -147,6 +147,23 @@ class MathModelWorkFlow(WorkFlow):
         user_output = UserOutput(work_dir=self.work_dir, ques_count=0)
 
         # ================================================================
+        # Phase 0.5: DataProfiler（数据形态探查，纯 Python，不消耗 LLM）
+        # ================================================================
+        data_profiler_text = ""
+        try:
+            from app.core.data_profiler import DataProfiler, format_profiles_for_prompt
+            data_profiler = DataProfiler(work_dir=self.work_dir)
+            data_profiles = data_profiler.profile_all()
+            data_profiler_text = format_profiles_for_prompt(data_profiles)
+            if data_profiles:
+                logger.info(f"[DataProfiler] 探查完成: {len(data_profiles)} 个文件")
+                for p in data_profiles:
+                    if p.detected_signals:
+                        logger.info(f"[DataProfiler] {p.file_name} 信号: {p.detected_signals}")
+        except Exception as e:
+            logger.warning(f"Phase 0.5: DataProfiler 失败（不影响流程）: {e}")
+
+        # ================================================================
         # Phase 1: ProblemAnalystAgent（前置，第一个运行）
         # ================================================================
         await redis_manager.publish_message(
@@ -164,7 +181,12 @@ class MathModelWorkFlow(WorkFlow):
         problem_analysis = None
         problem_analysis_text = ""
         try:
-            problem_analysis = await problem_analyst.run(problem.ques_all, {})
+            # 注入 DataProfiler 结果到 ProblemAnalystAgent
+            ques_all_with_profiler = problem.ques_all
+            if data_profiler_text:
+                ques_all_with_profiler = problem.ques_all + "\n\n" + data_profiler_text
+
+            problem_analysis = await problem_analyst.run(ques_all_with_profiler, {})
             logger.info(f"[ProblemAnalyst] 陷阱: {problem_analysis.pitfalls}")
             logger.info(f"[ProblemAnalyst] 评分重点: {problem_analysis.scoring_focus}")
 

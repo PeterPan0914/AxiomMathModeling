@@ -382,6 +382,31 @@ class WriterAgent(Agent):
         )
         return WriterResponse(response_content=response_content, footnotes=footnotes)
 
+    def update_system_prompt_for_chapter(
+        self,
+        chapter_type: str,
+        global_state_summary: str = "",
+    ) -> None:
+        """根据章节类型更新系统提示词。
+
+        Args:
+            chapter_type: 章节类型常量（CHAPTER_*）。
+            global_state_summary: 全局状态摘要。
+        """
+        from app.core.prompts.writer import get_writer_system_prompt
+        new_prompt = get_writer_system_prompt(
+            chapter_type=chapter_type,
+            global_state_summary=global_state_summary,
+            competition_type=self.comp_template.value if hasattr(self.comp_template, 'value') else str(self.comp_template),
+            format_output=self.format_out_put,
+        )
+        # 更新系统提示（替换 history 中的第一条消息）
+        if self.chat_history and self.chat_history[0].get("role") == "system":
+            self.chat_history[0]["content"] = new_prompt
+        else:
+            self.chat_history.insert(0, {"role": "system", "content": new_prompt})
+        self.system_prompt = new_prompt
+
     async def summarize(self) -> str:
         """总结对话内容，生成任务执行摘要。"""
         try:

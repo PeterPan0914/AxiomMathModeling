@@ -291,18 +291,16 @@ class LiteratureAgent(Agent):
         self,
         problem_description: str,
         competition_type: str = "国赛",
+        problem_analysis_text: str = "",
+        sub_problems_description: str = "",
     ) -> str:
         """执行文献调研并返回结构化结果。
-
-        工作流程：
-        1. 如果有 openalex_scholar，用它搜索相关论文
-        2. 如果没有，使用内置的"常见题型方法知识库"作为 fallback
-        3. 将搜索结果 + 题目描述发给 LLM 综合分析
-        4. 返回结构化的文献调研结果 JSON 字符串
 
         Args:
             problem_description: 题目描述文本。
             competition_type: 竞赛类型（国赛/美赛/其他）。
+            problem_analysis_text: ProblemAnalystAgent 的分析结果。
+            sub_problems_description: CoordinatorAgent 的子问题拆解描述。
 
         Returns:
             结构化的文献调研结果 JSON 字符串。
@@ -326,6 +324,8 @@ class LiteratureAgent(Agent):
             problem_description=problem_description,
             competition_type=competition_type,
             similar_papers=similar_papers,
+            problem_analysis_text=problem_analysis_text,
+            sub_problems_description=sub_problems_description,
         )
 
         user_prompt = f"""请基于以上信息，对该题目进行系统性的文献调研分析。
