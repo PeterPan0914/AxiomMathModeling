@@ -301,16 +301,88 @@ Professor 1 原话：
 | WriterAgent 摘要/结论 | 4 | 摘要、结论、改进、推广 |
 | **合计** | **~280** | **每个决策都有独立思考** |
 
-### 关键改变：从"一次思考"到"深度思考"
+### 核心设计原则：独立调用 + 结构化上下文注入
 
-| 改变 | 之前 | 之后 | 效果 |
-|------|------|------|------|
-| ModelerAgent | 1次处理4个子问题 | 每个子问题独立调用 | 每个问题获得完整推理深度 |
-| CoderAgent | 平均3轮/子问题 | 平均4轮/子问题（含数据探索） | 代码质量更高 |
-| 变量筛选 | 无 | 每个子问题独立 ModelSearchAgent | ICC 从 0.35 提升到 0.7+ |
-| 章节评审 | CriticAgent 1次/章 | ReviewerAgent + AwardJudgeAgent 各1次/章 | 双重保障 |
-| Reflexion | 0-1轮 | 3轮，每轮每章独立评审改进 | 论文质量持续提升 |
-| LiteratureAgent | 1次 | 3次（多轮搜索+补充引用） | 参考文献完整 |
+**问题**：如果每个子问题完全独立调用，就像"一群不相干的小学生"——Q3 不知道 Q1 的结论，Q4 不知道 Q2 的模型。这正是 Professor 2 批评的"平铺结构"。
+
+**解决方案**：DependencyAgent 构建 DAG 依赖图，每个子问题独立调用时，自动注入其依赖问题的核心结论。
+
+```
+                    ┌─────────────────────────────────────┐
+                    │         共享上下文层                  │
+                    │  (GlobalState + DependencyGraph)     │
+                    │                                     │
+                    │  • 题目全文                          │
+                    │  • 问题类型识别结果                   │
+                    │  • 问题重述结果                       │
+                    │  • 文献调研结果                       │
+                    │  • 每个子问题的核心结论（实时更新）    │
+                    └──────────┬──────────────────────────┘
+                               │
+              ┌────────────────┼────────────────┐
+              │                │                │
+              ▼                ▼                ▼
+        ┌──────────┐    ┌──────────┐    ┌──────────┐
+        │   Q1     │    │   Q2     │    │   Q3     │
+        │ 独立调用  │    │ 独立调用  │    │ 独立调用  │
+        │          │    │          │    │          │
+        │ 上下文注入│    │ 上下文注入│    │ 上下文注入│
+        │ • 题目全文│    │ • 题目全文│    │ • 题目全文│
+        │ • 问题类型│    │ • 问题类型│    │ • 问题类型│
+        │ • 无依赖  │    │ • Q1结论  │    │ • Q1结论  │
+        │          │    │          │    │ • Q2结论  │
+        └────┬─────┘    └────┬─────┘    └────┬─────┘
+             │               │               │
+             ▼               ▼               ▼
+        记录结论         记录结论         记录结论
+        到GlobalState    到GlobalState    到GlobalState
+```
+
+**每个 Agent 调用时的上下文包含：**
+
+| 上下文层 | 内容 | 来源 |
+|---------|------|------|
+| **全局上下文**（每次都注入） | 题目全文、竞赛类型、数据文件列表 | ProblemAnalystAgent |
+| **问题类型上下文**（每次都注入） | 标准问题类型、推荐模型家族、禁止模型 | ProblemTypeAgent + ProblemReformulationAgent |
+| **文献上下文**（每次都注入） | 主流方法、创新方向、参考文献 | LiteratureAgent |
+| **依赖上下文**（按需注入） | 前序问题的核心结论、关键数值、模型参数 | DependencyGraph |
+| **评审上下文**（改写时注入） | 正确性问题列表、国奖改进建议 | ReviewerAgent + AwardJudgeAgent |
+
+**具体实现：DependencyGraph.build_dependency_context()**
+
+```python
+def build_dependency_context(self, node_id: str) -> str:
+    """为某个子问题构建'强制上下文'，注入其所有依赖问题的结论。"""
+    dep_edges = self.get_dependency_edges_for(node_id)
+    if not dep_edges:
+        return ""
+
+    parts = ["=== 前序问题结论（你必须基于这些结论继续工作） ===\n"]
+    for edge in dep_edges:
+        source_node = self.nodes[edge.source]
+        parts.append(f"【{edge.source}: {source_node.description[:80]}】")
+        parts.append(f"  需要使用: {edge.what_to_use}")
+        parts.append(f"  使用方式: {edge.how_to_use}")
+        parts.append(f"  核心结论: {source_node.core_conclusion}")
+        if source_node.key_outputs:
+            parts.append(f"  关键数值: {source_node.key_outputs}")
+        parts.append("")
+
+    parts.append("=== 重要提醒 ===")
+    parts.append("你必须在方案中明确引用上述前序问题的结论，说明你如何利用了它们。\n")
+    return "\n".join(parts)
+```
+
+### 关键改变：从"一次思考"到"有上下文的深度思考"
+
+| 改变 | 之前 | 之后 | 上下文策略 |
+|------|------|------|-----------|
+| ModelerAgent | 1次处理4个子问题 | 每个子问题独立调用 | 注入：全局上下文 + 问题类型 + 文献 + 依赖结论 |
+| CoderAgent | 平均3轮/子问题 | 平均4轮/子问题 | 注入：model_spec + 依赖结论 + 数据探查结果 |
+| 变量筛选 | 无 | 每个子问题独立 ModelSearchAgent | 注入：数据特征 + 前序模型结论 |
+| 章节评审 | CriticAgent 1次/章 | ReviewerAgent + AwardJudgeAgent 各1次/章 | 注入：全局状态 + 前序章节内容 |
+| Reflexion | 0-1轮 | 3轮，每轮每章独立评审改进 | 注入：评审反馈 + 前轮改进记录 |
+| LiteratureAgent | 1次 | 3次（多轮搜索+补充引用） | 注入：问题类型 + 已选方法 |
 
 ### 时间预估
 
@@ -362,3 +434,4 @@ Professor 1 原话：
 1. **从"先验驱动"转向"数据驱动"**——每一个建模决策都必须被数据验证
 2. **从"18次思考"到"280次思考"**——质量的下限就是思考次数
 3. **从"一次通过"到"三轮 Reflexion"**——每章独立评审改进，持续迭代到国奖水平
+4. **从"独立小团队"到"有共享记忆的协作团队"**——每个 Agent 独立调用，但通过 DependencyGraph 和 GlobalState 共享上下文
