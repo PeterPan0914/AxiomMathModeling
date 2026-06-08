@@ -34,7 +34,15 @@ from app.core.agents import (
     OutlineAgent,
     ConsistencyAgent,
     ProblemAnalystAgent,
+    # Phase 2 新增
+    DependencyAgent,
+    ProblemTypeAgent,
+    ProblemReformulationAgent,
+    ModelSearchAgent,
+    ReviewerAgent,
+    AwardJudgeAgent,
 )
+from app.core.dependency_graph import QuestionDependencyGraph, QuestionNode, DependencyEdge
 from app.core.evaluation import QualityScore, QualityReport, QualityTracker
 from app.core.flows import Flows
 from app.core.global_state import GlobalState
@@ -288,7 +296,151 @@ class MathModelWorkFlow(WorkFlow):
         user_output = UserOutput(work_dir=self.work_dir, ques_count=self.ques_count)
 
         # ================================================================
-        # Phase 4: ModelerAgent（建模）
+        # Phase 3.1: ProblemTypeAgent（问题类型识别）
+        # ================================================================
+        await redis_manager.publish_message(
+            self.task_id,
+            SystemMessage(content="Phase 3.1: 问题类型识别与数据稀疏性分析..."),
+        )
+        await self._check_cancelled()
+
+        problem_type_report = None
+        problem_type_analysis_text = ""
+        try:
+            problem_type_agent = ProblemTypeAgent(
+                self.task_id, coordinator_llm,
+                context_window=settings.COORDINATOR_CONTEXT_WINDOW,
+                cancel_event=self.cancel_event,
+                diagnostic_logger=diag,
+            )
+            problem_type_report = await problem_type_agent.run(
+                problem.ques_all, self.questions
+            )
+
+            global_state.task_meta.current_phase = "problem_type_classified"
+            for q_id, pti in problem_type_report.sub_problem_types.items():
+                logger.info(
+                    f"[ProblemType] {q_id}: type={pti.primary_type}, "
+                    f"sparsity={pti.sparsity_report.sparsity_level}, "
+                    f"censoring={pti.censoring_detected}, confidence={pti.confidence:.2f}"
+                )
+
+            # 将问题类型分析注入 problem_analysis_text
+            from app.core.agents.problem_type_agent import problem_type_report_to_text
+            problem_type_analysis_text = problem_type_report_to_text(problem_type_report)
+            problem_analysis_text += f"\n\n问题类型识别:\n{problem_type_analysis_text}"
+
+            global_state.log_decision(
+                agent="ProblemTypeAgent",
+                decision=f"识别出 {len(problem_type_report.sub_problem_types)} 个子问题类型",
+                reasoning=str({k: v.primary_type for k, v in problem_type_report.sub_problem_types.items()}),
+            )
+
+            await redis_manager.publish_message(
+                self.task_id,
+                SystemMessage(content="Phase 3.1: 问题类型识别完成", type="success"),
+            )
+        except Exception as e:
+            logger.warning(f"Phase 3.1: 问题类型识别失败（不影响流程）: {e}")
+
+        # ================================================================
+        # Phase 3.2: DependencyAgent（子问题依赖分析）
+        # ================================================================
+        await redis_manager.publish_message(
+            self.task_id,
+            SystemMessage(content="Phase 3.2: 分析问题依赖关系..."),
+        )
+        await self._check_cancelled()
+
+        dep_graph = QuestionDependencyGraph()
+        try:
+            dependency_agent = DependencyAgent(
+                self.task_id, coordinator_llm,
+                context_window=settings.COORDINATOR_CONTEXT_WINDOW,
+                cancel_event=self.cancel_event,
+                diagnostic_logger=diag,
+            )
+            dep_graph = await dependency_agent.run(
+                ques_all=problem.ques_all,
+                questions=self.questions,
+            )
+
+            global_state.task_meta.current_phase = "dependency_analyzed"
+            global_state.problem_understanding.inter_problem_dependencies = (
+                f"执行顺序: {dep_graph.execution_order}, 依赖边数: {len(dep_graph.edges)}"
+            )
+            global_state.log_decision(
+                agent="DependencyAgent",
+                decision=f"构建依赖图: {dep_graph.execution_order}",
+                reasoning=f"依赖边: {[(e.source, e.target) for e in dep_graph.edges]}",
+            )
+
+            # 保存依赖图到诊断目录
+            dep_graph.save(f"{self.work_dir}/diagnostic/dependency_graph.json")
+
+            await redis_manager.publish_message(
+                self.task_id,
+                SystemMessage(
+                    content=f"Phase 3.2: 依赖关系分析完成，执行顺序: {dep_graph.execution_order}",
+                    type="success",
+                ),
+            )
+        except Exception as e:
+            logger.warning(f"Phase 3.2: 依赖分析失败（退化为平铺执行）: {e}")
+            # 退化：构建无依赖的平铺图
+            ques_keys = [k for k in self.questions.keys() if k.startswith("ques") and k != "ques_count"]
+            for idx, qk in enumerate(ques_keys):
+                dep_graph.add_node(QuestionNode(id=qk, description=str(self.questions.get(qk, ""))[:200]))
+            dep_graph.execution_order = ques_keys
+
+        # ================================================================
+        # Phase 3.3: ProblemReformulationAgent（问题重述）
+        # ================================================================
+        await redis_manager.publish_message(
+            self.task_id,
+            SystemMessage(content="Phase 3.3: 问题重述（将题目翻译为标准数学问题类型）..."),
+        )
+        await self._check_cancelled()
+
+        reformulation_result = None
+        try:
+            reformulation_agent = ProblemReformulationAgent(
+                self.task_id, modeler_llm,
+                context_window=settings.MODELER_CONTEXT_WINDOW,
+                cancel_event=self.cancel_event,
+                diagnostic_logger=diag,
+            )
+            reformulation_result = await reformulation_agent.run(
+                problem_description=problem.ques_all,
+                coordinator_questions=self.questions,
+                problem_analysis_text=problem_analysis_text,
+            )
+
+            global_state.task_meta.current_phase = "reformulated"
+            for q_key, sp in reformulation_result.sub_problems.items():
+                logger.info(f"[Reformulation] {q_key}: {sp.standard_problem_type} ({sp.problem_type_cn})")
+
+            global_state.log_decision(
+                agent="ProblemReformulationAgent",
+                decision=f"完成问题重述，{len(reformulation_result.sub_problems)} 个子问题",
+                reasoning="; ".join(
+                    f"{k}: {sp.standard_problem_type}" for k, sp in reformulation_result.sub_problems.items()
+                ),
+            )
+
+            await redis_manager.publish_message(
+                self.task_id,
+                SystemMessage(
+                    content=f"Phase 3.3: 问题重述完成: " +
+                            "; ".join(f"{k}→{sp.problem_type_cn}" for k, sp in reformulation_result.sub_problems.items()),
+                    type="success",
+                ),
+            )
+        except Exception as e:
+            logger.warning(f"Phase 3.3: 问题重述失败（退化为无重述模式）: {e}")
+
+        # ================================================================
+        # Phase 4: ModelerAgent（建模，注入问题重述结果）
         # ================================================================
         await redis_manager.publish_message(
             self.task_id,
@@ -303,8 +455,21 @@ class MathModelWorkFlow(WorkFlow):
             diagnostic_logger=diag,
         )
 
+        # 构建依赖上下文摘要给 ModelerAgent
+        dep_summary = ""
+        if dep_graph.edges:
+            dep_lines = []
+            for edge in dep_graph.edges:
+                dep_lines.append(f"- {edge.target} 依赖 {edge.source}: 需要使用 {edge.what_to_use}")
+            dep_summary = (
+                "\n\n【问题依赖关系（建模时必须考虑！后续问题的方案需利用前序结论）】\n"
+                + "\n".join(dep_lines)
+                + "\n\n执行顺序: " + " → ".join(dep_graph.execution_order)
+            )
+
         modeler_response = await modeler_agent.run(
-            coordinator_response, problem_analysis=problem_analysis_text
+            coordinator_response,
+            problem_analysis=problem_analysis_text + dep_summary,
         )
 
         # 更新 GlobalState：记录建模决策
@@ -384,8 +549,17 @@ class MathModelWorkFlow(WorkFlow):
             diagnostic_logger=diag,
         )
 
-        # 初始化 CriticAgent（质疑者，Phase 5 中使用）
-        critic_agent = CriticAgent(
+        # 初始化 ReviewerAgent（正确性守卫，替代 CriticAgent）
+        reviewer_agent = ReviewerAgent(
+            task_id=problem.task_id,
+            model=writer_llm,
+            context_window=settings.WRITER_CONTEXT_WINDOW,
+            cancel_event=self.cancel_event,
+            diagnostic_logger=diag,
+        )
+
+        # 初始化 AwardJudgeAgent（国奖评审官）
+        award_judge_agent = AwardJudgeAgent(
             task_id=problem.task_id,
             model=writer_llm,
             context_window=settings.WRITER_CONTEXT_WINDOW,
@@ -397,11 +571,20 @@ class MathModelWorkFlow(WorkFlow):
         solution_flows = flows.get_solution_flows(self.questions, modeler_response)
         config_template = get_config_template(problem.comp_template)
 
-        total_subtasks = len(solution_flows)
+        # 按依赖图的拓扑序排列子任务
+        ques_keys_ordered = [k for k in dep_graph.execution_order if k in solution_flows]
+        non_ques_keys = [k for k in solution_flows if k not in ques_keys_ordered]
+        eda_keys = [k for k in non_ques_keys if k == "eda"]
+        sa_keys = [k for k in non_ques_keys if k == "sensitivity_analysis"]
+        other_keys = [k for k in non_ques_keys if k not in ("eda", "sensitivity_analysis")]
+        ordered_keys = eda_keys + ques_keys_ordered + other_keys + sa_keys
+
+        total_subtasks = len(ordered_keys)
         completed_subtasks = 0
         failed_subtasks = []
 
-        for key, value in solution_flows.items():
+        for key in ordered_keys:
+            value = solution_flows[key]
             await self._check_cancelled()
             completed_subtasks += 1
 
@@ -411,9 +594,17 @@ class MathModelWorkFlow(WorkFlow):
                     SystemMessage(content=f"Phase 5: 代码手开始求解{key} ({completed_subtasks}/{total_subtasks})"),
                 )
 
+                # 构建依赖上下文（注入前序问题的结论）
+                dependency_context = dep_graph.build_dependency_context(key)
+
+                # 构建增强版 coder_prompt，注入依赖上下文
+                enhanced_coder_prompt = value["coder_prompt"]
+                if dependency_context:
+                    enhanced_coder_prompt = f"{dependency_context}\n\n【本题任务】\n{value['coder_prompt']}"
+
                 # 5a: CoderAgent 执行代码
                 coder_response = await coder_agent.run(
-                    prompt=value["coder_prompt"], subtask_title=key
+                    prompt=enhanced_coder_prompt, subtask_title=key
                 )
 
                 await redis_manager.publish_message(
@@ -526,62 +717,135 @@ class MathModelWorkFlow(WorkFlow):
                 global_state.paper_state.chapters_completed.append(key)
                 global_state.extract_from_writer_response(writer_response.response_content)
 
-                # Phase 5d: CriticAgent 质疑写作结果
+                # Phase 5d-1: ReviewerAgent 正确性审查
+                review_verdict = None
                 try:
-                    critique_result = await critic_agent.critique(
+                    review_verdict = await reviewer_agent.review(
                         target_output=writer_response.response_content,
-                        critique_type="chapter_logic",
-                        global_state_summary=global_state.inject_summary("CriticAgent"),
+                        review_type="chapter_logic",
+                        global_state_summary=global_state.inject_summary("ReviewerAgent"),
                     )
-                    if critique_result.issues:
+
+                    if review_verdict.issues:
                         logger.info(
-                            f"[CriticAgent] {key}: 发现 {len(critique_result.issues)} 个问题 "
-                            f"(决策: {critique_result.decision})"
+                            f"[ReviewerAgent] {key}: 正确性分 {review_verdict.correctness_score}/100, "
+                            f"发现 {len(review_verdict.issues)} 个问题 (决策: {review_verdict.decision})"
                         )
-                        for issue in critique_result.issues:
-                            logger.warning(f"  - [{issue.get('severity')}] {issue.get('issue', '')[:100]}")
 
-                        # reject 时注入反馈并重新写作（最多重试 1 次）
-                        if critique_result.decision == "reject":
-                            logger.warning(f"[CriticAgent] {key}: 致命问题，启动重写")
-                            await redis_manager.publish_message(
-                                self.task_id,
-                                SystemMessage(
-                                    content=f"CriticAgent 对 {key} 提出严重质疑，正在重新写作...",
-                                    type="warning",
-                                ),
-                            )
-
-                            # 构造带反馈的重写提示
-                            issues_text = "\n".join(
-                                f"- [{it.get('severity')}] {it.get('issue', '')}"
-                                for it in critique_result.issues
-                            )
-                            rewrite_prompt = f"""请根据以下评审反馈重新撰写本章节。
+                    # reject 时注入反馈并重写
+                    if review_verdict.decision == "reject":
+                        logger.warning(f"[ReviewerAgent] {key}: 致命问题，启动重写")
+                        await redis_manager.publish_message(
+                            self.task_id,
+                            SystemMessage(
+                                content=f"ReviewerAgent 对 {key} 发现致命问题，正在重写...",
+                                type="warning",
+                            ),
+                        )
+                        issues_text = "\n".join(
+                            f"- [{it.get('severity')}] {it.get('issue', '')}"
+                            for it in review_verdict.issues
+                        )
+                        rewrite_prompt = f"""请根据以下正确性审查反馈重新撰写本章节。
 
 【原始任务】
 {writer_prompt}
 
-【评审反馈（致命问题）】
+【正确性审查反馈（致命问题）】
 {issues_text}
 
 【修改要求】
-1. 重点解决评审中指出的所有问题
-2. 保持论文的整体结构和格式
-3. 确保内容准确、逻辑自洽
+1. 重点解决审查中指出的所有致命问题
+2. 确保数学正确性、逻辑自洽性、数据一致性
+3. 保持论文的整体结构和格式
+
+请输出完整的修改后内容。"""
+                        writer_response = await writer_agent.run(
+                            rewrite_prompt,
+                            available_images=coder_response.created_images,
+                            sub_title=f"{key} (正确性重写)",
+                        )
+                        user_output.set_res(key, writer_response)
+                        global_state.extract_from_writer_response(writer_response.response_content)
+                except Exception as e:
+                    logger.warning(f"Phase 5d-1: ReviewerAgent 审查失败（不影响流程）: {e}")
+
+                # Phase 5d-2: AwardJudgeAgent 国奖潜力评估
+                if review_verdict is not None and review_verdict.decision != "reject":
+                    try:
+                        award_verdict = await award_judge_agent.evaluate(
+                            paper_content=writer_response.response_content,
+                            global_state_summary=global_state.inject_summary("AwardJudgeAgent"),
+                            competition_type=problem.comp_template.value if hasattr(problem.comp_template, 'value') else str(problem.comp_template),
+                        )
+
+                        logger.info(
+                            f"[AwardJudgeAgent] {key}: 国奖分 {award_verdict.total_score}/100 "
+                            f"(创新性 {award_verdict.innovation_score}/30), 决策: {award_verdict.decision}"
+                        )
+
+                        # Innovation < 20 或总分 < 60：注入反馈并重写
+                        if award_verdict.decision in ("innovation_reject", "rewrite"):
+                            is_innovation = award_verdict.decision == "innovation_reject"
+                            reason = (
+                                f"创新性不足 ({award_verdict.innovation_score}/30)"
+                                if is_innovation
+                                else f"国奖总分不足 ({award_verdict.total_score}/100)"
+                            )
+                            logger.warning(f"[AwardJudgeAgent] {key}: {reason}，启动重写")
+                            await redis_manager.publish_message(
+                                self.task_id,
+                                SystemMessage(content=f"AwardJudgeAgent 对 {key}: {reason}，正在重写...", type="warning"),
+                            )
+
+                            award_feedback_parts = []
+                            if is_innovation:
+                                award_feedback_parts.append("【创新性不足 —— 这是国奖硬门槛，必须突破】")
+                            for s in award_verdict.improvement_suggestions[:5]:
+                                award_feedback_parts.append(
+                                    f"- [{s.get('dimension')}] {s.get('item', '')} (扣{s.get('points_lost', 0)}分): {s.get('fix', '')}"
+                                )
+                            award_feedback_text = "\n".join(award_feedback_parts)
+
+                            award_rewrite_prompt = f"""请根据以下国奖评审反馈修改本章节。
+当前国奖评分: {award_verdict.total_score}/100，创新性: {award_verdict.innovation_score}/30
+
+【原始任务】
+{writer_prompt}
+
+【国奖评审反馈】
+{award_feedback_text}
+
+【修改要求】
+{"1. 首要任务：提升创新性。考虑引入跨学科方法、独特的视角变换。" if is_innovation else "1. 按优先级解决国奖评审中的扣分项。"}
+2. 增强解释性：图表论证使用三段式（观察→含义→处置）。
+3. 保持数学正确性。
 
 请输出完整的修改后内容。"""
 
                             writer_response = await writer_agent.run(
-                                rewrite_prompt,
+                                award_rewrite_prompt,
                                 available_images=coder_response.created_images,
-                                sub_title=f"{key} (重写)",
+                                sub_title=f"{key} (国奖重写)",
                             )
                             user_output.set_res(key, writer_response)
                             global_state.extract_from_writer_response(writer_response.response_content)
-                            logger.info(f"[CriticAgent] {key}: 重写完成")
-                except Exception as e:
-                    logger.warning(f"Phase 5d: CriticAgent 质疑失败（不影响流程）: {e}")
+                    except Exception as e:
+                        logger.warning(f"Phase 5d-2: AwardJudgeAgent 评估失败（不影响流程）: {e}")
+
+                # 记录结论到依赖图（供后续子问题使用）
+                core_conclusion = ""
+                if hasattr(interpreter_result, 'key_findings') and interpreter_result.key_findings.conclusion:
+                    core_conclusion = interpreter_result.key_findings.conclusion[:500]
+                elif coder_response.code_response:
+                    core_conclusion = coder_response.code_response[:500]
+
+                dep_graph.record_conclusion(
+                    node_id=key,
+                    core_conclusion=core_conclusion,
+                    key_outputs=getattr(interpreter_result.key_findings, 'key_numbers', {}) if hasattr(interpreter_result, 'key_findings') else {},
+                    conclusion_source="ResultInterpreterAgent",
+                )
 
             except asyncio.CancelledError:
                 raise
