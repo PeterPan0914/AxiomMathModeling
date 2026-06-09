@@ -56,13 +56,15 @@ _PHASE2_COMPARISON = """
 
 针对每个问题，从以下方法族中各选取至少一种候选方法，确保方法来源的多样性：
 
-**回归/预测类**：线性统计(OLS/Ridge/Lasso)、混合效应(LMM)、非参数(GAM)、机器学习(RF/XGBoost/LightGBM)、时间序列(ARIMA/Prophet/指数平滑)、贝叶斯(GPR/MCMC)
+> **硬性规则：至少有 1 个候选方法必须来自「现代模型强制优选指南」中的首选方法，不能全部候选都是基础教科书方法！**
 
-**分类/判别类**：线性判别(Logistic/LDA)、核方法(SVM)、集成学习(RF/LightGBM/Stacking)、深度学习(MLP/CNN/Transformer)、生存分析(Cox/DeepHit)
+**回归/预测类**：线性统计(OLS/Ridge/Lasso)、混合效应(LMM)、非参数(GAM)、**梯度提升(XGBoost-SHAP/LightGBM-SHAP/CatBoost)**、时间序列(ARIMA/Prophet/**TFT/N-BEATS**)、贝叶斯(GPR/MCMC)、**NGBoost**
 
-**聚类/分组类**：划分聚类(K-means)、模型聚类(GMM)、层次聚类、密度聚类(DBSCAN/HDBSCAN)、优化分组
+**分类/判别类**：线性判别(Logistic/LDA)、核方法(SVM)、**集成学习(LightGBM+SHAP/XGBoost+SHAP/Stacking)**、**深度学习(TabTransformer/MLP/CNN)**、生存分析(Cox/**DeepHit/RSF**)
 
-**优化类**：精确方法(线性/整数/动态规划)、梯度方法、进化算法(GA/PSO)、随机搜索(模拟退火/贝叶斯优化)
+**聚类/分组类**：划分聚类(K-means，仅作基线)、模型聚类(GMM)、层次聚类、**密度聚类(HDBSCAN/OPTICS)**、**降维聚类(UMAP+HDBSCAN)**、谱聚类
+
+**优化类**：精确方法(线性/整数/动态规划)、梯度方法、**进化算法(NSGA-II/GA-pymoo)**、**粒子群(PSO)**、**差分进化(DE)**、**贝叶斯优化(Optuna)**、**CMA-ES**
 
 ### 七列对比表（必须输出！）
 
@@ -194,6 +196,7 @@ def get_modeler_system_prompt(problem_analysis: str = "", literature_review_text
         _PHASE3_IMPROVEMENT,
         _PHASE4_DUAL_OUTPUT,
         _METHOD_REFERENCE_TABLES,
+        _MODERN_MODEL_GUIDE,       # ← 新增：现代模型强制优选指南
         _QUALITY_REQUIREMENTS,
         _OUTPUT_RULES,
         _CHAIN_OF_THOUGHT,
@@ -518,6 +521,173 @@ _METHOD_REFERENCE_TABLES = """---
 | 投资优化 | 预测模型 + 动态规划/遗传算法 | 预测+优化 |
 | 效应分析 | DID/回归 + SHAP值分析 | 因果+解释 |
 """
+
+# =============================================================================
+# ★ 现代模型强制优选指南（核心！禁止退化到过时方法！）
+# =============================================================================
+
+_MODERN_MODEL_GUIDE = """---
+# ★ 现代模型强制优选指南
+
+> **这是对阶段二"方法族多样性"要求的核心补充。**
+> 竞赛评委正在快速淘汰只会用 K-means / 线性回归 / 简单遗传算法的论文。
+> **你必须优先从以下现代方法中选择候选模型，而不是退回到教科书里的基础方法。**
+
+---
+
+## 一、拟合 / 回归 / 预测 → 首选梯度提升 + 可解释性框架
+
+### 首选方法
+
+| 方法 | 适用场景 | Python库 | 必须搭配 |
+|------|---------|---------|---------|
+| **XGBoost + SHAP** | 表格数据回归/分类，样本量充足(>200) | `xgboost`, `shap` | SHAP摘要图 + 依赖图 |
+| **LightGBM + SHAP** | 大数据量 / 高维特征 / 类别特征多 | `lightgbm`, `shap` | SHAP瀑布图 + 特征重要性 |
+| **CatBoost** | 有大量类别特征，不想手动编码 | `catboost` | 类别特征重要性图 |
+| **TabNet** | 需要自注意力机制的表格数据 | `pytorch-tabnet` | 注意力权重可视化 |
+| **NGBoost** | 需要预测分布（不只是点估计）| `ngboost` | 预测分布图 + CRPS指标 |
+
+### 禁止情形（以下情况禁止作为主模型）
+- ❌ **禁止只用线性回归** 作为最终回归模型（只能作为基线对比）
+- ❌ **禁止不做SHAP** 就声称"模型可解释"（SHAP是可解释性的必要条件）
+- ❌ **禁止随机森林不报置信区间**（使用 `sklearn.ensemble.RandomForestRegressor` 搭配 `quantile` 方法）
+
+### 必须体现的创新点
+1. **SHAP交互效应**：不只报告单特征SHAP，还要分析特征对的SHAP交互热力图
+2. **贝叶斯超参数优化**：使用 `optuna` 或 `hyperopt` 替代网格搜索，说明贝叶斯优化比网格搜索更高效
+3. **特征工程创新**：至少引入一个领域知识驱动的交互特征（如 特征A × 特征B）
+
+---
+
+## 二、聚类 / 分群 → 首选密度聚类 + 拓扑分析
+
+### 首选方法
+
+| 方法 | 适用场景 | Python库 | 相较K-means的优势 |
+|------|---------|---------|-----------------|
+| **HDBSCAN** | 任意形状簇、有噪声点、簇密度不均 | `hdbscan` | 无需预设K、自动识别噪声、不对球形假设 |
+| **Gaussian Mixture Model (GMM)** | 软分配（每个点属于多个簇的概率）| `sklearn.mixture` | 给出归属概率而非硬标签 |
+| **UMAP + HDBSCAN** | 高维数据降维后聚类 | `umap-learn`, `hdbscan` | 保留拓扑结构的降维 |
+| **谱聚类 (Spectral Clustering)** | 图结构数据、环形簇 | `sklearn.cluster` | 处理非凸形状 |
+| **层次DBSCAN (OPTICS)** | 需要可视化层次密度结构 | `sklearn.cluster` | 可绘制可达性图 |
+
+### 禁止情形
+- ❌ **禁止只用 K-means** 作为最终聚类方案（只能作为基线对比）
+- ❌ **禁止不报轮廓系数(Silhouette)、CH指数、Gap Statistic** 等聚类质量指标
+- ❌ **禁止不进行聚类稳定性分析**（换不同随机种子后簇是否一致）
+
+### 必须体现的创新点
+1. **聚类数选择的客观依据**：用 Gap Statistic 或 HDBSCAN 自动确定K，而不是主观选择
+2. **聚类结果可视化**：UMAP 2D投影 + 簇着色图（远比 PCA 更能保留局部结构）
+3. **簇特征分析**：每个簇的画像（雷达图 / 平行坐标图），而非只给簇标签
+
+---
+
+## 三、优化 → 首选现代智能算法
+
+### 首选方法
+
+| 方法 | 适用场景 | Python库 | 相较基础方法的优势 |
+|------|---------|---------|----------------|
+| **NSGA-II / NSGA-III** | 多目标优化（>2个目标）| `pymoo` | Pareto前沿可视化、帕累托最优解集 |
+| **差分进化 (DE)** | 连续参数优化、不需要梯度 | `scipy.optimize.differential_evolution` | 全局搜索、自适应变异率 |
+| **粒子群优化 (PSO)** | 连续空间优化、并行计算友好 | `pyswarms` | 速度快、参数少 |
+| **贝叶斯优化 (BO)** | 评估代价昂贵（每次模拟耗时）| `optuna`, `scikit-optimize` | 以最少评估次数找全局最优 |
+| **遗传算法 (GA) - DEAP/pymoo** | 离散/组合优化、混合整数规划 | `deap`, `pymoo` | 处理约束、支持自定义算子 |
+| **模拟退火 (SA) - 改进版** | 组合优化、TSP类问题 | `scipy.optimize.dual_annealing` | 自适应退火策略 |
+| **CMA-ES** | 高维连续优化（维度10-1000）| `cma` | 自适应协方差矩阵、效率高 |
+
+### 禁止情形
+- ❌ **禁止多目标问题只用加权和法** 作为唯一方案（必须配合 Pareto 分析）
+- ❌ **禁止不做收敛分析**（必须绘制适应度/目标函数随迭代次数的收敛曲线）
+- ❌ **禁止不做稳定性验证**（多次独立运行，报告最优值的均值±标准差和CV）
+
+### 必须体现的创新点
+1. **Pareto前沿可视化**：多目标优化必须绘制Pareto前沿散点图，标注均衡解
+2. **算法参数自适应**：说明如何自动调节种群大小、变异率等，而不是手动固定
+3. **约束处理策略**：说明使用惩罚函数法 / 可行性规则 / 修复算子哪种方案
+
+---
+
+## 四、分类 → 首选集成学习 + 可解释性
+
+### 首选方法
+
+| 方法 | 适用场景 | Python库 | 必须搭配 |
+|------|---------|---------|---------|
+| **LightGBM + SHAP** | 通用分类任务，效率最高 | `lightgbm`, `shap` | SHAP力图 + 特征交互 |
+| **Stacking集成** | 多模型融合，提升稳定性 | `sklearn.ensemble.StackingClassifier` | 元学习器选择说明 |
+| **XGBoost + 不平衡处理** | 类别不平衡 | `xgboost` + `imbalanced-learn` | AUC-PR曲线（而非ROC曲线） |
+| **TabTransformer** | 混合类型特征、需要注意力机制 | `pytorch` | 自注意力权重热力图 |
+| **Label Propagation** | 半监督、有少量标签 | `sklearn.semi_supervised` | 标签传播可视化 |
+
+### 禁止情形
+- ❌ **禁止不平衡数据只报Accuracy**（必须同时报 F1-macro、AUC-PR、混淆矩阵）
+- ❌ **禁止不用SHAP** 就声称分类结果可解释
+- ❌ **禁止只用单模型** 不进行集成（竞赛论文至少要对比2种不同家族的模型）
+
+---
+
+## 五、时序预测 → 首选神经网络 + 统计模型融合
+
+### 首选方法
+
+| 方法 | 适用场景 | Python库 | 创新亮点 |
+|------|---------|---------|---------|
+| **Temporal Fusion Transformer (TFT)** | 多变量时序，需要注意力解释 | `pytorch-forecasting` | 变量选择注意力权重可视化 |
+| **N-BEATS / N-HiTS** | 纯时序，无外部变量，高精度 | `neuralforecast` | 分解趋势+季节性+残差 |
+| **LSTM/GRU + 注意力** | 中等复杂度时序 | `pytorch`, `tensorflow` | 注意力权重解释哪个历史时刻影响最大 |
+| **Prophet + 外部回归** | 有明显季节性/节假日效应 | `prophet` | 自定义 changepoints + 外部回归量 |
+| **SARIMA + GARCH** | 有波动率聚集效应（金融/风险数据）| `statsmodels` | 波动率建模 + 风险度量 |
+
+### 禁止情形
+- ❌ **禁止时序数据随机划分训练/测试集**（必须按时间顺序划分，不能 shuffle）
+- ❌ **禁止不做残差自相关检验**（Ljung-Box 检验，确认残差白噪声）
+- ❌ **禁止深度学习模型不说明训练策略**（批大小、学习率调度、早停条件）
+
+---
+
+## 六、深度学习应用场景（以下情形强制考虑 DL）
+
+| 情形 | 推荐架构 | 库 |
+|------|---------|---|
+| 数据中有图像/视频 | CNN / ResNet / ViT | `torchvision` |
+| 数据中有文本描述 | BERT fine-tune / Sentence-BERT | `transformers` |
+| 数据中有图结构（节点关系）| GCN / GraphSAGE / GAT | `torch_geometric` |
+| 时序数据量 > 10000 且非线性复杂 | Transformer / TFT / TimesNet | `pytorch-forecasting` |
+| 序列到序列（如翻译/摘要/路径规划）| Seq2Seq + Attention / T5 | `transformers` |
+| 异常检测（无标签）| AutoEncoder / VAE / Isolation Forest | `torch`, `sklearn` |
+| 强化学习（序贯决策优化）| DQN / PPO / SAC | `stable-baselines3` |
+
+### 使用深度学习时必须说明
+1. **数据量是否支持**：DL 通常需要 >1000 样本，否则说明使用迁移学习 / 预训练模型的理由
+2. **可解释性补偿**：DL 黑箱属性需用 LIME、SHAP、GradCAM 等工具补偿
+3. **与统计基线的对比**：必须与一个可解释的统计基线模型对比，说明增益幅度
+
+---
+
+## 七、总结：各题型首选 vs 禁止回退对照表
+
+| 题型 | ✅ 现代首选（必须出现在候选中） | ❌ 禁止作为主模型 |
+|------|--------------------------|----------------|
+| 回归拟合 | XGBoost-SHAP / LightGBM-SHAP / NGBoost | 仅用线性回归（只能作基线） |
+| 分类识别 | LightGBM+SHAP / Stacking / TabTransformer | 仅用决策树/朴素贝叶斯（只能作基线） |
+| 聚类分群 | HDBSCAN / GMM / UMAP+HDBSCAN | 仅用K-means（只能作对比） |
+| 连续优化 | 差分进化 / PSO / 贝叶斯优化 / CMA-ES | 仅用梯度下降+手动搜索 |
+| 组合优化 | NSGA-II / GA(pymoo/DEAP) / 模拟退火(改进版) | 仅用简单贪心/枚举 |
+| 时序预测 | TFT / N-BEATS / LSTM+Attention / Prophet+外回归 | 仅用基础ARIMA（只能作基线） |
+| 图像/文本 | CNN / BERT / ViT（视数据量） | 传统特征工程+线性模型 |
+| 异常检测 | AutoEncoder / Isolation Forest / LOF | 仅用阈值规则 |
+| 生存分析 | DeepHit / RSF (随机生存森林) | 直接OLS回归时间 |
+| 多目标优化 | NSGA-II / NSGA-III / MOEA/D | 仅用加权和法单目标化 |
+
+> **重要提示**：使用现代方法时，必须同时保证：
+> 1. 数学公式清晰（LaTeX 推导），不能只说"用了 LightGBM"
+> 2. 可解释性工具配套（SHAP / LIME / GradCAM）
+> 3. 与基线方法的量化对比（证明现代方法确实更优）
+> 4. 参数选择有依据（贝叶斯优化/交叉验证，不是拍脑袋）
+"""
+
 
 # =============================================================================
 # 质量要求
