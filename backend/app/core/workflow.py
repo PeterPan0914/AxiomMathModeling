@@ -727,6 +727,45 @@ class MathModelWorkFlow(WorkFlow):
 - 但仍需报告模型的诊断指标（残差图、Q-Q 图等）
 """
 
+                # 对 sensitivity_analysis 子任务注入六维度鲁棒性框架代码模板
+                # robustness_framework.py 中的代码模板在此处才真正接入 CoderAgent
+                if key == "sensitivity_analysis":
+                    from app.core.robustness_framework import (
+                        PARAMETER_SENSITIVITY_CODE,
+                        STRUCTURAL_SENSITIVITY_CODE,
+                        DATA_SENSITIVITY_CODE,
+                        SCENARIO_ANALYSIS_CODE,
+                        FEATURE_IMPORTANCE_CODE,
+                        STABILITY_VERIFICATION_CODE,
+                        ROBUSTNESS_CODER_PROMPT,
+                    )
+                    # 注入六维度框架说明和可直接复用的代码片段
+                    robustness_injection = f"""
+
+【六维度鲁棒性分析框架（必须全部执行）】
+{ROBUSTNESS_CODER_PROMPT}
+
+以下是可直接复用的代码模板，请根据本题实际模型适配后执行：
+
+## 组件1：参数灵敏度
+```python
+{PARAMETER_SENSITIVITY_CODE[:800]}...  # 参见上方框架说明适配
+```
+
+## 组件2：结构灵敏度
+```python
+{STRUCTURAL_SENSITIVITY_CODE[:600]}...  # 比较至少2种模型规格
+```
+
+## 组件3：数据灵敏度
+```python
+{DATA_SENSITIVITY_CODE[:600]}...  # K折+Bootstrap
+```
+
+【重要】每个组件完成后务必输出带格式的汇总统计（见框架说明中的输出要求）。
+"""
+                    enhanced_coder_prompt += robustness_injection
+
                 # 5a: CoderAgent 执行代码
                 coder_response = await coder_agent.run(
                     prompt=enhanced_coder_prompt, subtask_title=key
@@ -815,6 +854,20 @@ class MathModelWorkFlow(WorkFlow):
                     model_text = modeler_response.questions_solution[key]
                     first_line = model_text.split("\n")[0][:100] if model_text else ""
                     paper_context.model_choices[key] = first_line
+
+                # ResultInterpreter 失败降级：给 WriterAgent 原始 code_output 而非空上下文
+                # 避免静默失败（原来失败后 paper_context 只有截断的 code_response[:300]）
+                if interpreter_result is None and code_output:
+                    logger.info(f"[ResultInterpreter 降级] {key}: 注入原始 code_output 供 WriterAgent 使用")
+                    paper_context.update_key_result(
+                        section_key=key,
+                        conclusion=(
+                            "【注意：结果解读 Agent 执行失败，以下为原始代码输出，"
+                            "请自行从中提取关键数值和结论：】\n"
+                            + (code_output[:2000] if len(code_output) > 2000 else code_output)
+                        ),
+                        figures=coder_response.created_images or [],
+                    )
 
                 # 5c: WriterAgent 写模型章节
                 writer_prompt = flows.get_writer_prompt(
@@ -1106,22 +1159,71 @@ class MathModelWorkFlow(WorkFlow):
                 if key not in global_state.paper_state.chapters_completed:
                     global_state.paper_state.chapters_completed.append(key)
 
-                # 结构控制：检查章节篇幅
+                # 结构控制：检查章节篇幅，并在过短时触发扩写（而非仅记录日志）
                 section_report = structure_controller.check_section(
                     key, writer_response.response_content
                 )
                 if section_report.status == SectionStatus.TOO_SHORT:
+                    shortage = section_report.target_min - section_report.char_count
                     warn_msg = (
                         f"章节「{section_report.section_name}」篇幅不足 "
                         f"({section_report.char_count}字, "
-                        f"目标{section_report.target_min}-{section_report.target_max}字)。"
-                        f"{section_report.feedback}"
+                        f"目标{section_report.target_min}-{section_report.target_max}字，"
+                        f"缺少约{shortage}字）。启动扩写..."
                     )
                     logger.warning(f"[结构控制] {warn_msg}")
                     await redis_manager.publish_message(
                         self.task_id,
                         SystemMessage(content=warn_msg, type="warning"),
                     )
+                    # 触发 WriterAgent 扩写（仅在严重不足时，即当前字数 < 目标的 80%）
+                    if section_report.char_count < section_report.target_min * 0.8:
+                        try:
+                            expansion_prompt = f"""请扩写以下章节，使其达到目标字数。
+
+【当前内容（{section_report.char_count}字，目标 {section_report.target_min}-{section_report.target_max} 字）】
+{writer_response.response_content}
+
+【扩写要求】
+{section_report.feedback}
+
+【扩写原则】
+- 不要重复已有内容，在现有基础上补充深度
+- 按照质量要求补充缺失内容
+- 每个公式后用「其中」说明变量含义
+- 每张图表后配至少3行深入解读
+- 输出完整的扩写后内容（包含原有内容 + 新增内容）"""
+
+                            expanded_response = await writer_agent.run(
+                                expansion_prompt,
+                                available_images=coder_response.created_images,
+                                sub_title=f"{key} (结构控制扩写)",
+                            )
+                            # 检查扩写后是否有改善
+                            expanded_report = structure_controller.check_section(
+                                key, expanded_response.response_content
+                            )
+                            if expanded_report.char_count > section_report.char_count:
+                                # 扩写有效，更新结果
+                                writer_response = expanded_response
+                                user_output.set_res(key, writer_response)
+                                global_state.extract_from_writer_response(writer_response.response_content)
+                                logger.info(
+                                    f"[结构控制] {key} 扩写成功: "
+                                    f"{section_report.char_count} → {expanded_report.char_count} 字"
+                                )
+                                await redis_manager.publish_message(
+                                    self.task_id,
+                                    SystemMessage(
+                                        content=f"章节「{section_report.section_name}」扩写完成: {section_report.char_count}→{expanded_report.char_count}字",
+                                        type="success",
+                                    ),
+                                )
+                            else:
+                                logger.warning(f"[结构控制] {key} 扩写未见改善，保留原版本")
+                        except Exception as expand_err:
+                            logger.warning(f"[结构控制] {key} 扩写失败（不影响流程）: {expand_err}")
+
                 elif section_report.status == SectionStatus.TOO_LONG:
                     warn_msg = (
                         f"章节「{section_report.section_name}」篇幅超出 "
