@@ -786,6 +786,21 @@ class GlobalState:
                 )
             parts.append("【建模决策】\n" + "\n".join(md_lines))
 
+        # 数据探查摘要（CoderAgent、ModelerAgent 最需要，直接影响模型选择）
+        if for_agent in ("CoderAgent", "ModelerAgent"):
+            inv = self.problem_understanding.data_inventory
+            data_parts = []
+            # DataProfiler 完整摘要
+            profiler_summary = inv.data_range_checks.get("_profiler_summary", "")
+            if profiler_summary:
+                data_parts.append(profiler_summary[:2000])
+            # 已知数据问题（稀疏性/不平衡/重复测量等信号）
+            if inv.known_issues:
+                issues_str = "\n".join(f"  - {issue}" for issue in inv.known_issues[:10])
+                data_parts.append(f"【数据质量信号（建模时必须考虑！）】\n{issues_str}")
+            if data_parts:
+                parts.append("【DataProfiler 数据探查结果】\n" + "\n".join(data_parts))
+
         # 代码结果摘要（WriterAgent 需要）
         if self.code_results and for_agent in ("WriterAgent", "ReviewAgent"):
             cr_lines = []

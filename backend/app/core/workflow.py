@@ -160,8 +160,18 @@ class MathModelWorkFlow(WorkFlow):
                 for p in data_profiles:
                     if p.detected_signals:
                         logger.info(f"[DataProfiler] {p.file_name} 信号: {p.detected_signals}")
+                    # 更新 GlobalState 数据资产清单，供 CoderAgent/ModelerAgent 通过 inject_summary 访问
+                    global_state.problem_understanding.data_inventory.files.append(p.file_name)
+                    if p.detected_signals:
+                        global_state.problem_understanding.data_inventory.known_issues.extend(
+                            [f"{p.file_name}: {s}" for s in p.detected_signals]
+                        )
+            # 将完整 DataProfiler 摘要存入 GlobalState，CoderAgent/ModelerAgent 可通过 inject_summary 获取
+            if data_profiler_text:
+                global_state.problem_understanding.data_inventory.data_range_checks["_profiler_summary"] = data_profiler_text
         except Exception as e:
             logger.warning(f"Phase 0.5: DataProfiler 失败（不影响流程）: {e}")
+
 
         # ================================================================
         # Phase 1: ProblemAnalystAgent（前置，第一个运行）
@@ -536,6 +546,28 @@ class MathModelWorkFlow(WorkFlow):
         )
 
         # ================================================================
+        # 初始化代码解释器
+        # 必须在 Phase 4.5 之前创建：ModelSearchAgent 需要执行代码进行变量筛选
+        # Phase 5 的 CoderAgent 也复用此实例
+        # ================================================================
+        await redis_manager.publish_message(
+            self.task_id,
+            SystemMessage(content="创建代码沙盒环境"),
+        )
+        notebook_serializer = NotebookSerializer(work_dir=self.work_dir)
+        code_interpreter = await create_interpreter(
+            kind="local",
+            task_id=self.task_id,
+            work_dir=self.work_dir,
+            notebook_serializer=notebook_serializer,
+            timeout=3000,
+        )
+        await redis_manager.publish_message(
+            self.task_id,
+            SystemMessage(content="创建完成"),
+        )
+
+        # ================================================================
         # Phase 4.5: ModelSearchAgent（变量筛选，仅对包含 model_search_protocol 的子问题）
         # ================================================================
         model_search_results: dict[str, 'ModelSearchResult'] = {}
@@ -592,25 +624,8 @@ class MathModelWorkFlow(WorkFlow):
 
         # ================================================================
         # Phase 5: 子任务循环（Coder → ResultInterpreter → Writer）
+        # 注意：code_interpreter 已在 Phase 4 完成后提前初始化，此处直接使用
         # ================================================================
-        await redis_manager.publish_message(
-            self.task_id,
-            SystemMessage(content="创建代码沙盒环境"),
-        )
-
-        notebook_serializer = NotebookSerializer(work_dir=self.work_dir)
-        code_interpreter = await create_interpreter(
-            kind="local",
-            task_id=self.task_id,
-            work_dir=self.work_dir,
-            notebook_serializer=notebook_serializer,
-            timeout=3000,
-        )
-
-        await redis_manager.publish_message(
-            self.task_id,
-            SystemMessage(content="创建完成"),
-        )
 
         # 初始化 Agent 实例
         coder_agent = CoderAgent(
@@ -734,6 +749,8 @@ class MathModelWorkFlow(WorkFlow):
                             model_type = family_key
                             break
 
+                # 提前初始化为 None，确保无论 try 是否成功，下方引用都安全
+                interpreter_result = None
                 try:
                     interpreter_result = await result_interpreter.run(
                         code_output=code_output or "",
@@ -881,7 +898,9 @@ class MathModelWorkFlow(WorkFlow):
                     logger.warning(f"Phase 5d-1: ReviewerAgent 审查失败（不影响流程）: {e}")
 
                 # Phase 5d-2: AwardJudgeAgent 国奖潜力评估
-                if review_verdict is not None and review_verdict.decision != "reject":
+                # 注意：不过滤 reject 决策——ReviewerAgent 重写后的内容同样需要国奖评审
+                # 原逻辑 decision != "reject" 会导致重写后的章节绕过国奖评审
+                if review_verdict is not None:
                     try:
                         award_verdict = await award_judge_agent.evaluate(
                             paper_content=writer_response.response_content,
@@ -946,7 +965,8 @@ class MathModelWorkFlow(WorkFlow):
                 # 记录结论到依赖图（供后续子问题使用）
                 core_conclusion = ""
                 key_outputs = {}
-                if 'interpreter_result' in dir() and interpreter_result is not None:
+                # 用 is not None 判断（比 dir() 更可靠，dir() 在异步上下文中不含局部变量）
+                if interpreter_result is not None:
                     if hasattr(interpreter_result, 'key_findings') and interpreter_result.key_findings.conclusion:
                         core_conclusion = interpreter_result.key_findings.conclusion[:500]
                     if hasattr(interpreter_result, 'key_findings'):
