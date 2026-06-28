@@ -85,13 +85,6 @@ async def get_task_messages(task_id: str):
     return await _load_task_messages_from_file(task_id)
 
 
-@router.get("/track")
-async def track(task_id: str):
-    # 获取任务的token使用情况
-
-    pass
-
-
 @router.get("/status")
 async def get_service_status():
     """获取后端和 Redis 的运行状态。"""
