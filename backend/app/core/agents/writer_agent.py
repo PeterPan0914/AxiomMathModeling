@@ -319,7 +319,7 @@ class WriterAgent(Agent):
                 logger.info(f"[WriterAgent] 搜索文献结果\n{papers_str}")
 
                 if self.diagnostic_logger:
-                    self.diagnostic_logger.log_tool_result(
+                    await self.diagnostic_logger.log_tool_result(
                         agent_name=self.__class__.__name__,
                         tool_name="search_papers",
                         sub_title=sub_title or "unknown",

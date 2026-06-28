@@ -228,7 +228,7 @@ class ProblemTypeAgent(Agent):
         await self.append_chat_history(assistant_msg)
 
         if self.diagnostic_logger:
-            self.diagnostic_logger.log_interaction(
+            await self.diagnostic_logger.log_interaction(
                 agent_name=self.__class__.__name__,
                 sub_title="问题类型分类",
                 messages=self.chat_history[:-1],

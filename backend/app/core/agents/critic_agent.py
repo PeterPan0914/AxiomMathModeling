@@ -288,7 +288,7 @@ class CriticAgent(Agent):
                         "prompt_tokens": response.usage.prompt_tokens,
                         "completion_tokens": response.usage.completion_tokens,
                     }
-                self.diagnostic_logger.log_interaction(
+                await self.diagnostic_logger.log_interaction(
                     agent_name=self.__class__.__name__,
                     sub_title=f"critique_{critique_type}",
                     messages=messages,
@@ -364,7 +364,7 @@ class CriticAgent(Agent):
 
         # 记录结构化质疑结果到诊断日志
         if self.diagnostic_logger:
-            self.diagnostic_logger.log_tool_result(
+            await self.diagnostic_logger.log_tool_result(
                 agent_name=self.__class__.__name__,
                 tool_name=f"critique_{critique_type}",
                 sub_title="critique_result",

@@ -132,13 +132,13 @@ class ResultInterpreterAgent(Agent):
         """
         logger.info(f"ResultInterpreter: 开始解读 {subtask_title} 的结果")
 
-        # 根据模型类型生成 system prompt（仅首次）
-        if not self.chat_history:
+        # 根据模型类型生成 system prompt（仅首次运行）
+        if self.is_first_run:
+            self.is_first_run = False  # 防止后续 run() 重复注入
             system_prompt = get_result_interpreter_prompt(model_type)
             await self.append_chat_history(
                 {"role": "system", "content": system_prompt}
             )
-
         # 构造解读提示
         prompt = f"请解读以下代码执行结果：\n\n【子任务】{subtask_title}\n"
         if model_spec:
@@ -165,7 +165,7 @@ class ResultInterpreterAgent(Agent):
 
         # 记录诊断日志
         if self.diagnostic_logger:
-            self.diagnostic_logger.log_interaction(
+            await self.diagnostic_logger.log_interaction(
                 agent_name=self.__class__.__name__,
                 sub_title=f"结果解读-{subtask_title}",
                 messages=self.chat_history[:-1],

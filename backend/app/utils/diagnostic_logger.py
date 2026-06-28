@@ -1,5 +1,6 @@
 """诊断日志模块，记录 Agent 的完整交互过程用于质量分析。"""
 
+import asyncio
 import json
 import os
 from datetime import datetime
@@ -23,15 +24,19 @@ class DiagnosticLogger:
         self._interactions_path = os.path.join(self.diag_dir, "interactions.jsonl")
         self._tool_results_path = os.path.join(self.diag_dir, "tool_results.jsonl")
 
-    def _append_jsonl(self, filepath: str, record: dict) -> None:
-        """追加一条 JSON 记录到文件。"""
+    async def _append_jsonl(self, filepath: str, record: dict) -> None:
+        """追加一条 JSON 记录到文件（异步，不阻塞事件循环）。"""
         try:
-            with open(filepath, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            await asyncio.to_thread(self._write_jsonl_sync, filepath, record)
         except Exception as e:
             logger.error(f"诊断日志写入失败 ({filepath}): {e}")
 
-    def log_interaction(
+    @staticmethod
+    def _write_jsonl_sync(filepath: str, record: dict) -> None:
+        with open(filepath, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    async def log_interaction(
         self,
         agent_name: str,
         sub_title: str,
@@ -64,9 +69,9 @@ class DiagnosticLogger:
                 "usage": usage,
             },
         }
-        self._append_jsonl(self._interactions_path, record)
+        await self._append_jsonl(self._interactions_path, record)
 
-    def log_tool_result(
+    async def log_tool_result(
         self,
         agent_name: str,
         tool_name: str,
@@ -94,9 +99,9 @@ class DiagnosticLogger:
             "output": tool_output,
             "is_error": is_error,
         }
-        self._append_jsonl(self._tool_results_path, record)
+        await self._append_jsonl(self._tool_results_path, record)
 
-    def save_quality_data(self, quality_data: dict) -> None:
+    async def save_quality_data(self, quality_data: dict) -> None:
         """保存质量跟踪数据到 JSON 文件。
 
         Args:
@@ -109,7 +114,7 @@ class DiagnosticLogger:
         except Exception as e:
             logger.error(f"质量数据写入失败: {e}")
 
-    def save_workflow_config(self, config: dict) -> None:
+    async def save_workflow_config(self, config: dict) -> None:
         """保存工作流配置信息（模型名、Reflexion 配置等）。
 
         Args:
@@ -122,7 +127,7 @@ class DiagnosticLogger:
         except Exception as e:
             logger.error(f"配置信息写入失败: {e}")
 
-    def save_structure_report(self, report: dict) -> None:
+    async def save_structure_report(self, report: dict) -> None:
         """保存结构控制报告到 JSON 文件。
 
         Args:

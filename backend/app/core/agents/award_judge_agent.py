@@ -200,7 +200,7 @@ class AwardJudgeAgent(Agent):
             raw_response = response.content or ""
 
             if self.diagnostic_logger:
-                self.diagnostic_logger.log_interaction(
+                await self.diagnostic_logger.log_interaction(
                     agent_name=self.__class__.__name__,
                     sub_title="award_judge",
                     messages=messages,

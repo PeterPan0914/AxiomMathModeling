@@ -120,7 +120,7 @@ class ProblemAnalystAgent(Agent):
 
         # 记录诊断日志
         if self.diagnostic_logger:
-            self.diagnostic_logger.log_interaction(
+            await self.diagnostic_logger.log_interaction(
                 agent_name=self.__class__.__name__,
                 sub_title="题目深度分析",
                 messages=self.chat_history[:-1],

@@ -110,7 +110,7 @@ class ReviewAgent(Agent):
 
         # 记录诊断日志：结构化评审数据
         if self.diagnostic_logger:
-            self.diagnostic_logger.log_tool_result(
+            await self.diagnostic_logger.log_tool_result(
                 agent_name=self.__class__.__name__,
                 tool_name=f"review_{role or 'full'}",
                 sub_title=section_name or "unknown",
@@ -845,7 +845,7 @@ class MultiReviewer:
 
         # 记录诊断日志
         if self.diagnostic_logger:
-            self.diagnostic_logger.log_tool_result(
+            await self.diagnostic_logger.log_tool_result(
                 agent_name="MultiReviewer",
                 tool_name="review_synthesis",
                 sub_title=section_name or "unknown",

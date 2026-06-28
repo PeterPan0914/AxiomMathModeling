@@ -164,6 +164,8 @@ class LocalCodeInterpreter(BaseCodeInterpreter):
         # Get the output of the code
         msg_list = []
         while True:
+        max_polls = 1800  # 30 min timeout protection
+        for _poll in range(max_polls):
             try:
                 iopub_msg = self.kc.get_iopub_msg(timeout=1)
                 msg_list.append(iopub_msg)
@@ -177,6 +179,12 @@ class LocalCodeInterpreter(BaseCodeInterpreter):
                     self.km.interrupt_kernel()
                     self.interrupt_signal = False
                 continue
+        else:
+            logger.error(f"Jupyter kernel not idle after {max_polls}s, force interrupt")
+            try:
+                self.km.interrupt_kernel()
+            except Exception:
+                pass
 
         all_output: list[tuple[str, str]] = []
         for iopub_msg in msg_list:

@@ -178,7 +178,7 @@ class ModelerAgent(Agent):
 
             # 记录诊断日志
             if self.diagnostic_logger:
-                self.diagnostic_logger.log_interaction(
+                await self.diagnostic_logger.log_interaction(
                     agent_name=self.__class__.__name__,
                     sub_title="建模方案",
                     messages=self.chat_history,

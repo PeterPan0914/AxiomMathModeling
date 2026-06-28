@@ -119,7 +119,7 @@ class MathModelWorkFlow(WorkFlow):
         diag = DiagnosticLogger(self.work_dir)
         quality_tracker = QualityTracker()
         structure_controller = StructureController()
-        diag.save_workflow_config({
+        await diag.save_workflow_config({
             "task_id": self.task_id,
             "comp_template": problem.comp_template.value if hasattr(problem.comp_template, 'value') else str(problem.comp_template),
             "format_output": problem.format_output.value if hasattr(problem.format_output, 'value') else str(problem.format_output),
@@ -1307,7 +1307,7 @@ class MathModelWorkFlow(WorkFlow):
 
             # 将一致性检查结果记录到诊断日志
             if diag:
-                diag.save_structure_report({
+                await diag.save_structure_report({
                     "consistency_report_length": len(consistency_report),
                     "consistency_report_preview": consistency_report[:2000],
                 })
@@ -1339,7 +1339,7 @@ class MathModelWorkFlow(WorkFlow):
         for issue in paper_report.global_issues:
             logger.warning(f"[结构控制-全局去重] {issue}")
 
-        diag.save_structure_report({
+        await diag.save_structure_report({
             "total_chars": paper_report.total_chars,
             "target_length": paper_report.target_length,
             "ratio": paper_report.total_chars / paper_report.target_length,
@@ -1530,7 +1530,7 @@ class MathModelWorkFlow(WorkFlow):
         quality_tracker.print_summary()
 
         # 保存诊断数据
-        diag.save_quality_data(quality_tracker.get_summary())
+        await diag.save_quality_data(quality_tracker.get_summary())
 
         # 保存 PaperContext（兼容）
         paper_context.save(self.work_dir)

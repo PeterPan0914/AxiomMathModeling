@@ -469,5 +469,5 @@ DEFAULT_CHECKLIST = [
 ]
 
 
-# 全局质量跟踪器实例
-quality_tracker = QualityTracker()
+
+
