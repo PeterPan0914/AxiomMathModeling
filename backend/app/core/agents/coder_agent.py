@@ -122,125 +122,88 @@ class CoderAgent(Agent):
                     tool_choice="auto",
                     agent_name=self.__class__.__name__,
                 )
-
-                # 如果有工具调用
+                # 如果有工具调用（可能有多个）
                 if response.tool_calls:
-                    logger.info("检测到工具调用")
-                    tool_call = response.tool_calls[0]
-                    tool_id = tool_call.id
+                    logger.info(f"检测到 {len(response.tool_calls)} 个工具调用")
 
-                    if tool_call.name == "execute_code":
-                        logger.info(f"调用工具: {tool_call.name}")
-                        await redis_manager.publish_message(
-                            self.task_id,
-                            SystemMessage(
-                                content=f"代码手调用{tool_call.name}工具"
-                            ),
-                        )
-
-                        code = json.loads(tool_call.arguments)["code"]
-
-                        await redis_manager.publish_message(
-                            self.task_id,
-                            InterpreterMessage(
-                                input={"code": code},
-                            ),
-                        )
-
-                        # 更新对话历史 - 添加助手的响应
-                        assistant_msg: dict = {"role": "assistant", "content": response.content}
-                        if response.reasoning_content:
-                            assistant_msg["reasoning_content"] = response.reasoning_content
-                        if response.tool_calls:
-                            assistant_msg["tool_calls"] = [
-                                {
-                                    "id": tc.id,
-                                    "type": "function",
-                                    "function": {"name": tc.name, "arguments": tc.arguments},
-                                }
-                                for tc in response.tool_calls
-                            ]
-                        await self.append_chat_history(assistant_msg)
-
-                        # 执行工具调用
-                        logger.info("执行工具调用")
-                        (
-                            text_to_gpt,
-                            error_occurred,
-                            error_message,
-                        ) = await self.code_interpreter.execute_code(code)
-
-                        # 添加工具执行结果
-                        if error_occurred:
-                            # 即使发生错误也要添加tool响应
-                            await self.append_chat_history(
-                                {
-                                    "role": "tool",
-                                    "tool_call_id": tool_id,
-                                    "name": "execute_code",
-                                    "content": error_message,
-                                }
-                            )
-
-                            # 记录诊断日志
-                            if self.diagnostic_logger:
-                                self.diagnostic_logger.log_tool_result(
-                                    agent_name=self.__class__.__name__,
-                                    tool_name="execute_code",
-                                    sub_title=subtask_title,
-                                    tool_input={"code": code},
-                                    tool_output=error_message,
-                                    is_error=True,
-                                )
-
-                            logger.warning(f"代码执行错误: {error_message}")
-                            retry_count += 1
-                            logger.info(f"当前尝试次:{retry_count} / {self.max_retries}")
-                            last_error_message = error_message
-                            reflection_prompt = get_reflection_prompt(error_message, code)
-
-                            await redis_manager.publish_message(
-                                self.task_id,
-                                SystemMessage(content="代码手反思纠正错误", type="error"),
-                            )
-
-                            await self.append_chat_history(
-                                {"role": "user", "content": reflection_prompt}
-                            )
-                            continue
-                        else:
-                            # 成功执行的tool响应
-                            await self.append_chat_history(
-                                {
-                                    "role": "tool",
-                                    "tool_call_id": tool_id,
-                                    "name": "execute_code",
-                                    "content": text_to_gpt,
-                                }
-                            )
-
-                            # 记录诊断日志
-                            if self.diagnostic_logger:
-                                self.diagnostic_logger.log_tool_result(
-                                    agent_name=self.__class__.__name__,
-                                    tool_name="execute_code",
-                                    sub_title=subtask_title,
-                                    tool_input={"code": code},
-                                    tool_output=text_to_gpt,
-                                    is_error=False,
-                                )
-
-                            # 成功执行后继续循环，等待下一步指令
-                            continue
-                    else:
-                        # 未预期的工具名称，记录错误并让 LLM 重试
-                        logger.warning(f"未预期的工具名称: {tool_call.name}")
+                    # 校验所有 tool_call：仅支持 execute_code
+                    unknown_tools = [tc for tc in response.tool_calls if tc.name != "execute_code"]
+                    if unknown_tools:
+                        # 至少存在一个未识别的工具名：让 LLM 重新生成（计入 retry 防止死循环）
+                        unknown_names = ", ".join(tc.name for tc in unknown_tools)
+                        logger.warning(f"未预期的工具名称: {unknown_names}")
                         await self.append_chat_history(
                             {"role": "assistant", "content": response.content or ""}
                         )
                         await self.append_chat_history(
-                            {"role": "user", "content": f"你调用了不存在的工具 '{tool_call.name}'，请只使用 execute_code 工具。"}
+                            {"role": "user", "content": f"你调用了不存在的工具 ({unknown_names})，请只使用 execute_code 工具。"}
                         )
+                        retry_count += 1
+                        last_error_message = f"未预期的工具名称: {unknown_names}"
+                        continue
+
+                    # 一次性把 assistant 消息（含全部 tool_calls）追加到 history
+                    assistant_msg: dict = {"role": "assistant", "content": response.content}
+                    if response.reasoning_content:
+                        assistant_msg["reasoning_content"] = response.reasoning_content
+                    assistant_msg["tool_calls"] = [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {"name": tc.name, "arguments": tc.arguments},
+                        }
+                        for tc in response.tool_calls
+                    ]
+                    await self.append_chat_history(assistant_msg)
+
+                    # 依次执行每个 tool_call，串行调用内核
+                    for tool_call in response.tool_calls:
+                        tool_id = tool_call.id
+                        code = json.loads(tool_call.arguments)["code"]
+                        await redis_manager.publish_message(
+                            self.task_id,
+                            SystemMessage(content=f"代码手调用{tool_call.name}工具"),
+                        )
+                        await redis_manager.publish_message(
+                            self.task_id,
+                            InterpreterMessage(input={"code": code}),
+                        )
+                        (text_to_gpt, error_occurred, error_message) = await self.code_interpreter.execute_code(code)
+
+                        if self.diagnostic_logger:
+                            await self.diagnostic_logger.log_tool_result(
+                                agent_name=self.__class__.__name__,
+                                tool_name="execute_code",
+                                sub_title=subtask_title,
+                                tool_input={"code": code},
+                                tool_output=error_message if error_occurred else text_to_gpt,
+                                is_error=error_occurred,
+                            )
+
+                        if error_occurred:
+                            logger.warning(f"代码执行错误: {error_message}")
+                            # 工具失败：追加 tool 响应，注入反思 prompt，计入 retry
+                            await self.append_chat_history(
+                                {"role": "tool", "tool_call_id": tool_id, "name": "execute_code", "content": error_message}
+                            )
+                            await redis_manager.publish_message(
+                                self.task_id,
+                                SystemMessage(content="代码手反思纠正错误", type="error"),
+                            )
+                            last_error_message = error_message
+                            reflection_prompt = get_reflection_prompt(error_message, code)
+                            await self.append_chat_history({"role": "user", "content": reflection_prompt})
+                            retry_count += 1
+                            # 任何一次失败都跳出当前 tool_call 列表，进入下一轮让 LLM 反思
+                            break
+                        else:
+                            await self.append_chat_history(
+                                {"role": "tool", "tool_call_id": tool_id, "name": "execute_code", "content": text_to_gpt}
+                            )
+                    # for-loop 结束：
+                    #   - 若 break 触发，continue 进入下一轮反思
+                    #   - 若全部成功，continue 进入下一轮让 LLM 决定后续
+                    continue
                         continue
                 else:
                     # 没有工具调用，但可能 LLM 把代码作为文本返回了（部分模型不支持 tool_use）
@@ -260,7 +223,7 @@ class CoderAgent(Agent):
                             text_to_gpt, error_occurred, error_message = await self.code_interpreter.execute_code(code)
 
                             if self.diagnostic_logger:
-                                self.diagnostic_logger.log_tool_result(
+                                await self.diagnostic_logger.log_tool_result(
                                     agent_name=self.__class__.__name__,
                                     tool_name="execute_code (extracted)",
                                     sub_title=subtask_title,
@@ -285,6 +248,7 @@ class CoderAgent(Agent):
                                 "content": "代码已执行完成。如果还需要继续分析或执行更多代码，请继续；如果任务已完成，请说明结果。"
                             })
                             continue
+                            retry_count += 1  # 占位：每个完整循环至少算一轮，避免 max_retries=None 时死循环
                         continue
                     else:
                         # 没有代码块，认为任务完成
