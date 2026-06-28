@@ -515,9 +515,19 @@ class MathModelWorkFlow(WorkFlow):
                 parts.append(f"## 创新包装建议\n{reformulation_result.innovation_packaging}")
             reformulation_text = "\n".join(parts)
 
+        # 注入 DataProfiler 摘要（供 ModelerAgent 触发"数据驱动"决策闸门）
+        profiler_summary = global_state.problem_understanding.data_inventory.data_range_checks.get(
+            "_profiler_summary", ""
+        )
+        profiler_block = (
+            f"\n\n【DataProfiler 摘要（建模时必须先消化）】\n{profiler_summary[:2000]}"
+            if profiler_summary
+            else ""
+        )
+
         modeler_response = await modeler_agent.run(
             coordinator_response,
-            problem_analysis=problem_analysis_text + dep_summary,
+            problem_analysis=problem_analysis_text + dep_summary + profiler_block,
             literature_review_text=literature_review_text[:3000],
             reformulation_text=reformulation_text,
         )
