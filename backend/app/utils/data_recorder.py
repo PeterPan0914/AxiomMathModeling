@@ -66,7 +66,7 @@ class DataRecorder:
         )
 
         # 使用 RichPrinter 打印表格
-        from utils.RichPrinter import RichPrinter
+        from app.utils.RichPrinter import RichPrinter
 
         RichPrinter.table(
             headers=headers,
