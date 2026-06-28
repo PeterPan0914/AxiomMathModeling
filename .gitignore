@@ -10,3 +10,9 @@ dump.rdb
 backend/.env.dev
 .trae/
 *.bak
+
+# Codex CLI 自动生成的本地 Agent 指引（含本机路径，不入库）
+AGENTS.md
+
+# 审计工具输出
+.audit/
