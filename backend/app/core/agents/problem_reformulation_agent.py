@@ -171,7 +171,7 @@ class ProblemReformulationAgent(Agent):
             json_str = response.content or ""
 
             if self.diagnostic_logger:
-                self.diagnostic_logger.log_interaction(
+                await self.diagnostic_logger.log_interaction(
                     agent_name=self.__class__.__name__,
                     sub_title="问题重述",
                     messages=self.chat_history,
@@ -193,7 +193,7 @@ class ProblemReformulationAgent(Agent):
                 return result
 
             logger.warning(f"ProblemReformulationAgent: JSON 解析失败 (第{attempt+1}/{self.max_retries}次)")
-            if attempt >= self.max_retries - 1:
+            if attempt >= self.max_retries:  # 已达 max_retries 次
                 break
             await self.append_chat_history({"role": "assistant", "content": json_str})
             await self.append_chat_history({

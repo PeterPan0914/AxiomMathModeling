@@ -95,7 +95,7 @@ class CoordinatorAgent(Agent):
 
                 # 记录诊断日志
                 if self.diagnostic_logger:
-                    self.diagnostic_logger.log_interaction(
+                    await self.diagnostic_logger.log_interaction(
                         agent_name=self.__class__.__name__,
                         sub_title="问题拆解",
                         messages=self.chat_history,
@@ -126,9 +126,9 @@ class CoordinatorAgent(Agent):
                         f"最后的错误: {str(e)}"
                     )
 
-                # 添加错误反馈提示，使用当前轮次的 system_prompt
+                # 把错误以 user 消息追加（不要追加 system，会污染 history）
                 error_prompt = f"上次响应格式错误: {str(e)}。请严格输出JSON格式"
-                await self.append_chat_history({
+                await self.append_chat_history({"role": "user", "content": error_prompt})
                     "role": "system",
                     "content": system_prompt + "\n" + error_prompt,
                 })
