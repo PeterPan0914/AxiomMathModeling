@@ -1,6 +1,7 @@
 """OpenAlex 学术文献搜索模块。"""
 
-import requests
+import asyncio
+import requests  # noqa: F401  # 保留作 to_thread 同步包装
 from typing import List, Dict, Any
 from app.services.redis_manager import redis_manager
 from app.schemas.response import ScholarMessage
@@ -47,17 +48,17 @@ class OpenAlexScholar:
         # 创建一个足够大的空列表来存放所有单词
         max_position = 0
         for positions in abstract_inverted_index.values():
-            if positions and max(positions) > max_position:
-                max_position = max(positions)
-
-        words = [""] * (max_position + 1)
-
-        # 在正确的位置填入单词
+            # 防御：positions 可能是 None / 空 list / 包含 None 的 list
+            if not positions:
+                continue
+            valid_positions = [p for p in positions if isinstance(p, int)]
+            if valid_positions and max(valid_positions) > max_position:
+                max_position = max(valid_positions)
         for word, positions in abstract_inverted_index.items():
             for position in positions:
-                words[position] = word
-
-        # 拼接单词形成文本
+                # 防御：position 可能是 None 或非整数，或越界
+                if isinstance(position, int) and 0 <= position < len(words):
+                    words[position] = word
         return " ".join(words).strip()
 
     async def search_papers(self, query: str, limit: int = 8) -> List[Dict[str, Any]]:
@@ -99,8 +100,8 @@ class OpenAlexScholar:
         response: requests.Response | None = None
         try:
             print(f"请求 URL: {base_url} 参数: {params}")
-            response = requests.get(base_url, params=params, headers=headers)
-            print(f"响应状态: {response.status_code}")
+            # 使用 asyncio.to_thread 把同步 requests 调用放到线程池，避免阻塞事件循环
+            response = await asyncio.to_thread(requests.get, base_url, params=params, headers=headers)
 
             response.raise_for_status()
             results = response.json()
