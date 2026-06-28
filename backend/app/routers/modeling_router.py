@@ -326,7 +326,7 @@ async def run_modeling_task_async(
         _active_tasks.pop(task_id, None)
         # 仅在正常完成时转换 md 为 docx
         if task_completed:
-            md_2_docx(task_id)
+            await md_2_docx(task_id)
 
 
 class CancelTaskResponse(BaseModel):

@@ -1,6 +1,7 @@
 """通用工具函数模块，提供任务 ID 生成、文件操作和文档转换等功能。"""
 
 import os
+import asyncio
 import shutil
 import datetime
 import hashlib
@@ -186,12 +187,8 @@ def transform_link(task_id: str, content: str):
     return content
 
 
-def md_2_docx(task_id: str):
-    """将 Markdown 论文转换为 DOCX 格式。
-
-    Args:
-        task_id: 任务 ID。
-    """
+def _md_2_docx_sync(task_id: str):
+    """同步执行 pandoc 转换（不应直接调用，使用 md_2_docx 异步包装）。"""
     work_dir = get_work_dir(task_id)
     md_path = os.path.join(work_dir, "res.md")
     docx_path = os.path.join(work_dir, "res.docx")
@@ -212,6 +209,22 @@ def md_2_docx(task_id: str):
     )
     print(f"转换完成: {docx_path}")
     logger.info(f"转换完成: {docx_path}")
+
+
+async def md_2_docx(task_id: str):
+    """将 Markdown 论文异步转换为 DOCX 格式。
+
+    使用 asyncio.to_thread 把同步 pandoc 调用放到线程池中执行，
+    避免阻塞 asyncio 事件循环（pandoc 转换通常耗时 5-30 秒）。
+
+    Args:
+        task_id: 任务 ID。
+    """
+    try:
+        await asyncio.to_thread(_md_2_docx_sync, task_id)
+    except Exception as e:
+        # pandoc 未安装或转换失败：记录日志但不抛异常（docx 是可选产物）
+        logger.error(f"Markdown 转 DOCX 失败: {e}")
 
 
 def split_footnotes(text: str) -> tuple[str, list[tuple[str, str]]]:
