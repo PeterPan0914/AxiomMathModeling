@@ -91,6 +91,79 @@ FIGURE_ARGUMENTATION_RULES = """
 # 章节承诺追踪机制（专家方案核心改动）
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# 机制推理硬约束（评委重点审查的"洞察力"环节）
+# ---------------------------------------------------------------------------
+
+MECHANISM_REASONING_RULES = """
+# 机制推理硬约束（评委重点审查的"洞察力"环节）
+
+## 规则
+任何"X 影响 Y"的论断，必须**先写机制再写结果**。仅写相关关系会被判为"无洞察"。
+
+## 强制三段式（机制链）
+
+```
+【现象】观察到 X 与 Y 的统计关系（如相关系数 r=-0.42，p<0.01）
+【机制】在现实中，是什么物理/生物/经济/社会过程导致了这种关系？
+       （如：高 BMI → 母体血容量增大 → 单位体积胎儿游离 DNA 被稀释 → Y 浓度降低）
+【证据】哪个文献/数据/图表支持这个机制？
+       （如：Wang et al. 2013 报告 BMI>30 组 Y 浓度平均低 15%；附件2 第3列与 BMI 列相关性 -0.38）
+```
+
+## 禁止的纯相关表述
+
+❌ "高 BMI 与 Y 浓度呈负相关"——只描述现象
+❌ "BMI 抑制 Y 的增长"——无机制
+❌ "数据表明 X 影响了 Y"——空话
+❌ 连续 3 句以上仅报数字不解释机制
+
+## 必须的机制来源（按优先级）
+
+1. **领域常识**：生理/经济/物理常识（如血容量、收益递减、网络效应）
+2. **题目附件**：附件 1-3 的数据特征是否支持机制
+3. **LiteratureAgent 提供的文献**：检索到的论文中提到的工作机制
+4. **DataProfiler 输出的统计特征**：如类别不平衡暗示采样偏差
+
+## 自检清单
+写完每一段因果论述后，必须自问：
+- [ ] 这段有没有写"为什么"？
+- [ ] 机制链条是否至少包含 1 个中间变量？
+- [ ] 有没有数据/文献支撑这个机制？
+"""
+# ---------------------------------------------------------------------------
+# 引用强制规则（如果 LiteratureAgent 已提供文献则必引）
+# ---------------------------------------------------------------------------
+
+CITATION_MANDATE = """
+# 引用强制规则（如果 LiteratureAgent 已提供文献则必引）
+
+## 强制引用数（按章节）
+
+| 章节 | 最低引用数 | 来源 |
+|------|----------|------|
+| 摘要 | 0（摘要不引文献是惯例） | — |
+| 问题重述 / 引言 | 至少 2 条 | LiteratureAgent.Mainstream |
+| 方法选择论证 | 至少 3 条 | LiteratureAgent.Mainstream + Innovation |
+| 模型建立 | 至少 1 条 | LiteratureAgent.Innovation |
+| 结果分析 | 至少 1 条 | LiteratureAgent.Innovation |
+| 灵敏度/鲁棒性 | 至少 1 条 | LiteratureAgent 任何段 |
+| **全文总计** | **≥ 8 条** | — |
+
+## 引用格式
+
+使用编号引用：[1], [2]... 论文末尾列出参考文献表（按出现顺序）。
+
+## 引用必须"用上"
+
+❌ 引用了但没在论证中起作用——空挂
+✅ "Wang et al. [1] 在 NIPT 领域报告了 ICC=0.7 量级，与我们 DataProfiler 算出的 0.74 一致，验证了 LMM 的必要性。"
+
+## 如果 LiteratureAgent 没提供文献
+
+**禁止凭空编造引用**。改为：明确写"经检索，公开文献中针对本题的同类研究较少，我们的工作填补了 X 方向的空白"，但仍要引 LiteratureAgent 输出的方法族名称作为方法论锚点。
+"""
+
 CHAPTER_PROMISES_RULES = """
 # 章节承诺追踪机制（强制遵守！）
 
@@ -860,22 +933,22 @@ $$x_i \\geq 0, \\quad i = 1, 2, ..., n$$
 def _get_chapter_specific_rules(chapter_type: str) -> str:
     """根据章节类型返回专项写作规范。"""
     if chapter_type == CHAPTER_ABSTRACT:
-        return ABSTRACT_WRITING_RULES + FIGURE_ARGUMENTATION_RULES + CHAPTER_PROMISES_RULES
+        return ABSTRACT_WRITING_RULES + FIGURE_ARGUMENTATION_RULES + CHAPTER_PROMISES_RULES + MECHANISM_REASONING_RULES + CITATION_MANDATE
 
     if chapter_type == CHAPTER_PROBLEM_ANALYSIS:
-        return PROBLEM_ANALYSIS_RULES + CHAPTER_PROMISES_RULES
+        return PROBLEM_ANALYSIS_RULES + CHAPTER_PROMISES_RULES + MECHANISM_REASONING_RULES + CITATION_MANDATE
 
     if chapter_type == CHAPTER_MODEL:
-        return CHAPTER_PROMISES_RULES + FIGURE_ARGUMENTATION_RULES
+        return CHAPTER_PROMISES_RULES + FIGURE_ARGUMENTATION_RULES + MECHANISM_REASONING_RULES + CITATION_MANDATE
 
     if chapter_type == CHAPTER_RESULTS:
-        return RESULTS_ANALYSIS_RULES + FIGURE_ARGUMENTATION_RULES + CHAPTER_PROMISES_RULES
+        return RESULTS_ANALYSIS_RULES + FIGURE_ARGUMENTATION_RULES + CHAPTER_PROMISES_RULES + MECHANISM_REASONING_RULES + CITATION_MANDATE
 
     if chapter_type == CHAPTER_ROBUSTNESS:
-        return CHAPTER_PROMISES_RULES + FIGURE_ARGUMENTATION_RULES
+        return CHAPTER_PROMISES_RULES + FIGURE_ARGUMENTATION_RULES + MECHANISM_REASONING_RULES + CITATION_MANDATE
 
     if chapter_type == CHAPTER_EVALUATION:
-        return CHAPTER_PROMISES_RULES
+        return CHAPTER_PROMISES_RULES + MECHANISM_REASONING_RULES + CITATION_MANDATE
 
     # default: 注入所有规则
     return (
@@ -884,6 +957,8 @@ def _get_chapter_specific_rules(chapter_type: str) -> str:
         + RESULTS_ANALYSIS_RULES
         + FIGURE_ARGUMENTATION_RULES
         + CHAPTER_PROMISES_RULES
+        + MECHANISM_REASONING_RULES
+        + CITATION_MANDATE
     )
 
 
