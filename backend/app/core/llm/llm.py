@@ -1,6 +1,7 @@
 """LLM 交互模块，封装大语言模型的调用、重试和消息发送。"""
 
 from typing import Any
+import asyncio
 from app.utils.common_utils import transform_link, split_footnotes
 from app.utils.log_util import logger
 import time
@@ -123,7 +124,7 @@ class LLM:
                 base_delay = retry_delay * (3 if is_connection_error else 1)
                 sleep_time = min(base_delay * (2 ** (attempt - 1)), 60)
                 logger.error(f"第{attempt}次重试 ({'连接错误' if is_connection_error else '其他错误'}): {error_str}，等待 {sleep_time:.0f}s")
-                time.sleep(sleep_time)
+                await asyncio.sleep(sleep_time)
 
     def _validate_and_fix_tool_calls(self, history: list) -> list:
         """验证并修复工具调用完整性。"""
