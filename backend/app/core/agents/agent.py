@@ -36,7 +36,7 @@ class Agent:
         self.current_token_count = 0  # 当前历史的估算 token 数
         self.cancel_event = cancel_event  # 取消信号
         self.diagnostic_logger = diagnostic_logger
-
+        self.is_first_run = True  # 首次运行标志：避免重复注入 system prompt
     def _estimate_tokens(self, text: str) -> int:
         """估算文本的 token 数量。"""
         return max(1, len(text) // _CHARS_PER_TOKEN)
@@ -96,11 +96,11 @@ class Agent:
         try:
             logger.info(f"{self.__class__.__name__}:开始:执行对话")
 
-            # 更新对话历史
-            await self.append_chat_history({"role": "system", "content": system_prompt})
+            # 更新对话历史：首次运行时才注入 system 消息，避免后续轮次重复添加
+            if self.is_first_run:
+                self.is_first_run = False
+                await self.append_chat_history({"role": "system", "content": system_prompt})
             await self.append_chat_history({"role": "user", "content": prompt})
-
-            # 获取历史消息用于本次对话（支持取消中断）
             response = await self._chat(
                 history=self.chat_history,
                 agent_name=self.__class__.__name__,
@@ -138,7 +138,7 @@ class Agent:
                         "prompt_tokens": response.usage.prompt_tokens,
                         "completion_tokens": response.usage.completion_tokens,
                     }
-                self.diagnostic_logger.log_interaction(
+                await self.diagnostic_logger.log_interaction(
                     agent_name=self.__class__.__name__,
                     sub_title=sub_title,
                     messages=self.chat_history[:-1],  # 排除刚添加的 assistant 消息
