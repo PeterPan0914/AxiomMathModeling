@@ -129,6 +129,3 @@ class CoordinatorAgent(Agent):
                 # 把错误以 user 消息追加（不要追加 system，会污染 history）
                 error_prompt = f"上次响应格式错误: {str(e)}。请严格输出JSON格式"
                 await self.append_chat_history({"role": "user", "content": error_prompt})
-                    "role": "system",
-                    "content": system_prompt + "\n" + error_prompt,
-                })

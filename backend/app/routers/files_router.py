@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from app.utils.common_utils import get_current_files, get_work_dir
 import os
 import subprocess
+import sys
 from icecream import ic  # type: ignore[import-unresolved]
 from fastapi import HTTPException
 
@@ -43,7 +44,12 @@ async def open_folder(task_id: str):
     if os.name == "nt":
         subprocess.run(["explorer", work_dir])
     elif os.name == "posix":
-        subprocess.run(["open", work_dir])
+        # 修复：posix 不等于 macOS，需要进一步区分 darwin 与 linux
+        # macOS 用 open；Linux/其他 POSIX 用 xdg-open
+        if sys.platform == "darwin":
+            subprocess.run(["open", work_dir])
+        else:
+            subprocess.run(["xdg-open", work_dir])
     else:
         raise HTTPException(status_code=500, detail=f"不支持的操作系统: {os.name}")
 

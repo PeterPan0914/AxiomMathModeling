@@ -28,6 +28,8 @@ class E2BCodeInterpreter(BaseCodeInterpreter):
     ):
         super().__init__(task_id, work_dir, notebook_serializer)
         self.sbx = None
+        # 修复：原实现未初始化此属性，get_created_images 首次访问会触发 AttributeError
+        self.created_images: list[str] = []
 
     @classmethod
     async def create(

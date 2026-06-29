@@ -204,7 +204,6 @@ class CoderAgent(Agent):
                     #   - 若 break 触发，continue 进入下一轮反思
                     #   - 若全部成功，continue 进入下一轮让 LLM 决定后续
                     continue
-                        continue
                 else:
                     # 没有工具调用，但可能 LLM 把代码作为文本返回了（部分模型不支持 tool_use）
                     # 尝试从 content 中提取代码块并执行
