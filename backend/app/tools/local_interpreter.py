@@ -163,7 +163,8 @@ class LocalCodeInterpreter(BaseCodeInterpreter):
         logger.info(f"执行代码: {code}")
         # Get the output of the code
         msg_list = []
-        while True:
+        # 修复：原 while True 死循环无超时保护，长时间运行的代码会无限挂起
+        # 改用 1800 次轮询 × 1s = 30 分钟超时，超时后强制中断内核
         max_polls = 1800  # 30 min timeout protection
         for _poll in range(max_polls):
             try:

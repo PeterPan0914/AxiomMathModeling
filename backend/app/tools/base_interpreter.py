@@ -30,10 +30,13 @@ class BaseCodeInterpreter(abc.ABC):
         """初始化解释器，必要时上传文件、启动内核等"""
         ...
 
-    @abc.abstractmethod
-    async def _pre_execute_code(self):
-        """执行初始化代码"""
-        ...
+    async def _pre_execute_code(self) -> None:
+        """执行初始化代码（同步子类的可选钩子，默认空实现）。
+
+        子类可重写以注入 import / 字体加载等初始化代码。
+        基类提供空实现，避免强制子类必须实现此方法。
+        """
+        return None
 
     @abc.abstractmethod
     async def execute_code(self, code: str) -> tuple[str, bool, str]:

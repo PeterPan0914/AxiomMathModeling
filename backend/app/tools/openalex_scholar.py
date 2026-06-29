@@ -45,7 +45,7 @@ class OpenAlexScholar:
         if not abstract_inverted_index:
             return ""
 
-        # 创建一个足够大的空列表来存放所有单词
+        # 扫描得到最大 position，决定 words 列表长度
         max_position = 0
         for positions in abstract_inverted_index.values():
             # 防御：positions 可能是 None / 空 list / 包含 None 的 list
@@ -54,12 +54,18 @@ class OpenAlexScholar:
             valid_positions = [p for p in positions if isinstance(p, int)]
             if valid_positions and max(valid_positions) > max_position:
                 max_position = max(valid_positions)
+
+        # 修复：原实现漏掉 words 初始化，运行时会触发 NameError
+        words: list[str | None] = [None] * (max_position + 1)
         for word, positions in abstract_inverted_index.items():
+            if not positions:
+                continue
             for position in positions:
                 # 防御：position 可能是 None 或非整数，或越界
                 if isinstance(position, int) and 0 <= position < len(words):
                     words[position] = word
-        return " ".join(words).strip()
+        # 过滤掉空位（理论上不应有空位，但防御性处理）
+        return " ".join(w for w in words if w).strip()
 
     async def search_papers(self, query: str, limit: int = 8) -> List[Dict[str, Any]]:
         """使用 OpenAlex API 搜索学术论文。
