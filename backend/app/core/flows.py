@@ -290,7 +290,7 @@ class Flows:
         code_output = code_interpreter.get_code_output(key)
 
         questions_quesx_keys = self.get_questions_quesx_keys()
-        bgc = self.questions["background"]
+        bgc = self.questions.get("background", "")  # 修复：CoordinatorAgent 有时会漏掉 background 字段，以防 KeyError 绕过
         ctx_injection = paper_context.inject_into_prompt(key) if paper_context else ""
 
         quesx_writer_prompt = {

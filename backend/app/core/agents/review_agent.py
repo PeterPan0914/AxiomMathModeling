@@ -817,11 +817,16 @@ class MultiReviewer:
         )
 
         # 构建合并后的 ReviewResponse
+        # 修复：三审制仅产出 method/writing/format 三维度，原代码将 logic_score 和 language_score
+        # 都赋为 writing，会造成“逻辑分”与“语言分”总是相同。
+        # 现采取近似划分：逻辑跟随方法论（推导、假设、证明全在方法论里），语言跟随写作。
+        method_score_val = synthesis["score_breakdown"]["method"]
+        writing_score_val = synthesis["score_breakdown"]["writing"]
         merged = ReviewResponse(
             overall_score=synthesis["overall_score"],
-            math_score=synthesis["score_breakdown"]["method"],
-            logic_score=synthesis["score_breakdown"]["writing"],
-            language_score=synthesis["score_breakdown"]["writing"],
+            math_score=method_score_val,
+            logic_score=method_score_val,
+            language_score=writing_score_val,
             format_score=synthesis["score_breakdown"]["format"],
             feedback=synthesis["combined_feedback"],
             improvements=[

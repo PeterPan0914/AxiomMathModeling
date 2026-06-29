@@ -708,11 +708,19 @@ class GlobalState:
 
         # 提取关键数值（写入最新代码结果或创建临时记录）
         numbers = self._extract_key_numbers(content)
-        if numbers:
-            # 如果有正在处理的代码结果，追加到那里
-            for _q_id, cr in self.code_results.items():
+        if not numbers:
+            return
+        if not self.code_results:
+            # 没有代码结果时，一次存储需要 key 参数，回退等其他模块调用 update_code_result。
+            return
+        # 修复：原实现仅写入 code_results 中的第一个项（break 在 for 首轮被立即退出），
+        # 导致多问题任务时后续 code_result 删失关键数值。
+        # 现在对每个 code_result 都写入（单例简单处理，不分键__key等详细信息）。
+        for _q_id, cr in self.code_results.items():
+            try:
                 cr.key_metrics.update(numbers)
-                break
+            except Exception:  # 以防盖 dict 相关错误，不影响其他 code_result
+                continue
 
     def _extract_symbols(self, content: str) -> None:
         """从论文文本中提取符号定义（表格格式）。"""

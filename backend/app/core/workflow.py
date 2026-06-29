@@ -1037,6 +1037,10 @@ class MathModelWorkFlow(WorkFlow):
                 if not core_conclusion and coder_response.code_response:
                     core_conclusion = coder_response.code_response[:500]
 
+                # 修复：非 ques 子任务（eda/sensitivity_analysis）不一定在依赖图中，
+                # record_conclusion 内部直接读 self.nodes[key] 会抛 KeyError。
+                if key not in dep_graph.nodes:
+                    dep_graph.add_node(QuestionNode(id=key))
                 dep_graph.record_conclusion(
                     node_id=key,
                     core_conclusion=core_conclusion,
@@ -1206,7 +1210,9 @@ class MathModelWorkFlow(WorkFlow):
 
                             expanded_response = await writer_agent.run(
                                 expansion_prompt,
-                                available_images=coder_response.created_images,
+                                # 修复：Phase 7 这里 coder_response 是 Phase 5 的局部变量、不在作用域，
+                                # 采用 WriterAgent 内部缓存的图片列表（Phase 5 写入过）。
+                                available_images=writer_agent.available_images,
                                 sub_title=f"{key} (结构控制扩写)",
                             )
                             # 检查扩写后是否有改善

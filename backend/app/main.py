@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 from app.routers import modeling_router, ws_router, common_router, files_router
 from app.utils.log_util import logger
+from app.config.setting import settings
 from fastapi.staticfiles import StaticFiles
 from app.utils.cli import get_ascii_banner, center_cli_str
 
@@ -37,9 +38,12 @@ app.include_router(files_router.router)
 
 
 # 跨域 CORS
+# 修复：原实现 hardcoded 为 ["*"]，部署后环境变量 CORS_ALLOW_ORIGINS 配置不生效。
+# 从 settings 读取，与 .env 中 CORS_ALLOW_ORIGINS 保持一致。
+cors_origins = settings.CORS_ALLOW_ORIGINS if isinstance(settings.CORS_ALLOW_ORIGINS, list) else ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

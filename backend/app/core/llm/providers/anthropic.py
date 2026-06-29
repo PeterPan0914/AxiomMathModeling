@@ -75,8 +75,15 @@ class AnthropicProvider(BaseProvider):
         for msg in messages:
             role = msg.get("role", "user")
 
-            if role == "system" and system_prompt is None:
-                system_prompt = msg["content"]
+            if role == "system":
+                # 修复：第一条 system 消息提取为 system_prompt，后续出现的 system 消息合并到首条
+                # 避免丢到 converted 里导致 Anthropic API 报错（Anthropic 不支持在 message 中使用 role="system"）。
+                if system_prompt is None:
+                    system_prompt = msg.get("content", "") or ""
+                else:
+                    additional = msg.get("content", "") or ""
+                    if additional:
+                        system_prompt = f"{system_prompt}\n\n{additional}"
                 continue
 
             if role == "assistant" and "tool_calls" in msg and msg["tool_calls"]:

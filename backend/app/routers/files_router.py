@@ -7,18 +7,20 @@ import subprocess
 import sys
 from icecream import ic  # type: ignore[import-unresolved]
 from fastapi import HTTPException
+from app.config.setting import settings
 
 router = APIRouter()
 
 
 @router.get("/download_url")
 async def get_download_url(task_id: str, filename: str):
-    return {"download_url": f"http://localhost:8000/static/{task_id}/{filename}"}
+    # 修复：原本硬编码 http://localhost:8000，部署到非本地环境时下载链接会指向错误的域名
+    return {"download_url": f"{settings.SERVER_HOST}/static/{task_id}/{filename}"}
 
 
 @router.get("/download_all_url")
 async def get_download_all_url(task_id: str):
-    return {"download_url": f"http://localhost:8000/static/{task_id}/all.zip"}
+    return {"download_url": f"{settings.SERVER_HOST}/static/{task_id}/all.zip"}
 
 
 @router.get("/files")

@@ -34,6 +34,14 @@ def parse_cors(value: str) -> list[str]:
 class Settings(BaseSettings):
     """全局应用配置，从环境变量和 .env 文件加载。"""
     ENV: str = "dev"
+    # ============ LLM shared default config ============
+    # 4 agents (coordinator/modeler/coder/writer) share these. Priority:
+    # per-Agent field (COORDINATOR_* etc.) > LLM_DEFAULT_* shared default.
+    LLM_DEFAULT_API_TYPE: Optional[ApiType] = None
+    LLM_DEFAULT_API_KEY: Optional[str] = None
+    LLM_DEFAULT_MODEL: Optional[str] = None
+    LLM_DEFAULT_BASE_URL: Optional[str] = None
+    LLM_DEFAULT_MAX_TOKENS: Optional[int] = None
 
     COORDINATOR_API_TYPE: Optional[ApiType] = None
     COORDINATOR_API_KEY: Optional[str] = None
