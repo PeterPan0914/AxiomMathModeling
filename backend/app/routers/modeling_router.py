@@ -1,4 +1,4 @@
-"""建模任务路由模块，提供任务创建、API 验证和配置管理等接口。"""
+"""建模任务路由模块，提供任务创建和示例运行接口。"""
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, UploadFile
 from app.core.workflow import MathModelWorkFlow
@@ -20,11 +20,7 @@ from fastapi import HTTPException
 from icecream import ic  # type: ignore[import-unresolved]
 from app.schemas.request import ExampleRequest
 from pydantic import BaseModel
-from app.config.setting import settings, ApiType
-from app.core.llm.providers.openai_chat import OpenAIChatProvider
-from app.core.llm.providers.openai_responses import OpenAIResponsesProvider
-from app.core.llm.providers.anthropic import AnthropicProvider
-from app.core.llm.providers.base import BaseProvider
+from app.config.setting import settings
 import requests
 
 router = APIRouter()
@@ -32,12 +28,6 @@ router = APIRouter()
 # 任务注册表: task_id -> (asyncio.Task, asyncio.Event)
 _active_tasks: Dict[str, Tuple[asyncio.Task, asyncio.Event]] = {}
 
-
-class ValidateApiKeyRequest(BaseModel):
-    api_key: str
-    base_url: str = "https://api.openai.com/v1"
-    model_id: str
-    api_type: str = "openai-chat"
 
 
 class ValidateOpenalexEmailRequest(BaseModel):
@@ -49,102 +39,8 @@ class ValidateOpenalexEmailResponse(BaseModel):
     message: str
 
 
-class ValidateApiKeyResponse(BaseModel):
-    valid: bool
-    message: str
 
 
-class SaveApiConfigRequest(BaseModel):
-    coordinator: dict
-    modeler: dict
-    coder: dict
-    writer: dict
-    openalex_email: str
-
-
-@router.post("/save-api-config")
-async def save_api_config(request: SaveApiConfigRequest):
-    """
-    保存验证成功的 API 配置到 settings
-    """
-    try:
-        # 更新各个模块的设置
-        def _update_agent_config(prefix: str, config: dict):
-            """更新单个 agent 的配置，保持模型名为小写（API 要求）。"""
-            if not config:
-                return
-            setattr(settings, f"{prefix}_API_KEY", config.get("apiKey", ""))
-            # 模型名强制小写，避免 API 返回 "Not supported model MiMo-V2.5-Pro"
-            model_id = config.get("modelId", "")
-            setattr(settings, f"{prefix}_MODEL", model_id.lower() if model_id else "")
-            setattr(settings, f"{prefix}_BASE_URL", config.get("baseUrl", ""))
-            if api_type := config.get("apiType"):
-                setattr(settings, f"{prefix}_API_TYPE", api_type)
-            if cw := config.get("contextWindow"):
-                setattr(settings, f"{prefix}_CONTEXT_WINDOW", int(cw))
-
-        _update_agent_config("COORDINATOR", request.coordinator)
-        _update_agent_config("MODELER", request.modeler)
-        _update_agent_config("CODER", request.coder)
-        _update_agent_config("WRITER", request.writer)
-
-        if request.openalex_email:
-            settings.OPENALEX_EMAIL = request.openalex_email
-
-        return {"success": True, "message": "配置保存成功"}
-    except Exception as e:
-        logger.error(f"保存配置失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"保存配置失败: {str(e)}")
-
-
-@router.post("/validate-api-key", response_model=ValidateApiKeyResponse)
-async def validate_api_key(request: ValidateApiKeyRequest):
-    """
-    验证 API Key 的有效性
-    """
-    try:
-        provider: BaseProvider
-        match request.api_type:
-            case ApiType.OPENAI_RESPONSES:
-                provider = OpenAIResponsesProvider()
-            case ApiType.ANTHROPIC:
-                provider = AnthropicProvider()
-            case _:
-                provider = OpenAIChatProvider()
-
-        await provider.call(
-            messages=[{"role": "user", "content": "Hi"}],
-            model=request.model_id,
-            api_key=request.api_key,
-            base_url=request.base_url
-            if request.base_url != "https://api.openai.com/v1"
-            else None,
-            max_tokens=1,
-        )
-
-        return ValidateApiKeyResponse(valid=True, message="✓ 模型 API 验证成功")
-    except Exception as e:
-        error_msg = str(e)
-
-        # 解析不同类型的错误
-        if "401" in error_msg or "Unauthorized" in error_msg:
-            return ValidateApiKeyResponse(valid=False, message="✗ API Key 无效或已过期")
-        elif "404" in error_msg or "Not Found" in error_msg:
-            return ValidateApiKeyResponse(
-                valid=False, message="✗ 模型 ID 不存在或 Base URL 错误"
-            )
-        elif "429" in error_msg or "rate limit" in error_msg.lower():
-            return ValidateApiKeyResponse(
-                valid=False, message="✗ 请求过于频繁，请稍后再试"
-            )
-        elif "403" in error_msg or "Forbidden" in error_msg:
-            return ValidateApiKeyResponse(
-                valid=False, message="✗ API 权限不足或账户余额不足"
-            )
-        else:
-            return ValidateApiKeyResponse(
-                valid=False, message=f"✗ 验证失败: {error_msg[:50]}..."
-            )
 
 
 @router.post("/validate-openalex-email", response_model=ValidateOpenalexEmailResponse)

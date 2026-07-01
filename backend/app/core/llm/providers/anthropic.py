@@ -20,7 +20,20 @@ class AnthropicProvider(BaseProvider):
         max_tokens: int | None = None,
         top_p: float | None = None,
     ) -> StandardResponse:
-        client = AsyncAnthropic(api_key=api_key, base_url=base_url)
+        # 第三方 Anthropic 兼容网关（nengpa.com / token-plan 等）常用 Authorization: Bearer，
+        # 官方 Anthropic 用 x-api-key。同时发两个头，让两种鉴权方式的网关都能用。
+        # 官方 anthropic.com 网关的 SDK 仍以 x-api-key 为主，Authorization 头会被网关忽略，不会冲突。
+        extra_headers = (
+            {"Authorization": f"Bearer {api_key}"}
+            if base_url and "anthropic.com" not in base_url
+            else {}
+        )
+        client = AsyncAnthropic(
+            api_key=api_key,
+            auth_token=api_key,
+            base_url=base_url,
+            default_headers=extra_headers,
+        )
 
         system_prompt, anthropic_messages = self._convert_messages(messages)
 

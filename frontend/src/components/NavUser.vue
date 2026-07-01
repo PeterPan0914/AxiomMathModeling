@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -16,17 +15,7 @@ import {
 	SidebarMenuItem,
 	useSidebar,
 } from "@/components/ui/sidebar";
-import ApiKeyDialog from "@/pages/chat/components/ApiDialog.vue";
-import {
-	BadgeCheck,
-	Bell,
-	ChevronsUpDown,
-	KeyRound,
-	LogOut,
-} from "lucide-vue-next";
-import { ref } from "vue";
-
-// ---- Props ----
+import { BadgeCheck, Bell, ChevronsUpDown, LogOut } from "lucide-vue-next";
 
 const props = defineProps({
 	user: {
@@ -39,18 +28,7 @@ const props = defineProps({
 	},
 });
 
-// ---- Reactive State ----
-
 const { isMobile } = useSidebar();
-
-/** API Key 对话框开关状态 */
-const isApiKeyDialogOpen = ref(false);
-
-// ---- Methods ----
-
-const openApiKeyDialog = () => {
-	isApiKeyDialogOpen.value = true;
-};
 </script>
 
 <template>
@@ -91,13 +69,6 @@ const openApiKeyDialog = () => {
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuGroup>
-            <DropdownMenuItem @click="openApiKeyDialog">
-              <KeyRound />
-              API Key
-            </DropdownMenuItem>
-          </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuGroup>
             <DropdownMenuItem>
               <BadgeCheck />
               Account
@@ -116,6 +87,4 @@ const openApiKeyDialog = () => {
       </DropdownMenu>
     </SidebarMenuItem>
   </SidebarMenu>
-  <ApiKeyDialog v-model:open="isApiKeyDialogOpen" />
-
 </template>

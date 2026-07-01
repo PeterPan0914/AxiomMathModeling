@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { saveApiConfig } from "@/apis/apiKeyApi";
 import { submitModelingTask } from "@/apis/submitModelingApi";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -14,7 +13,6 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
-import { useApiKeyStore } from "@/stores/apiKeys";
 import { useTaskStore } from "@/stores/task";
 import { FileUp } from "lucide-vue-next";
 import { Rocket } from "lucide-vue-next";
@@ -26,7 +24,6 @@ import type FileConfirmDialog from "./FileConfirmDialog.vue";
 
 const taskStore = useTaskStore();
 const { toast } = useToast();
-const apiKeyStore = useApiKeyStore();
 const currentStep = ref(1);
 const fileConfirmDialog = ref<InstanceType<typeof FileConfirmDialog> | null>(
 	null,
@@ -105,23 +102,6 @@ const router = useRouter();
 /** 提交建模任务 */
 const handleSubmit = async () => {
 	try {
-		if (apiKeyStore.isEmpty) {
-			toast({
-				title: "请先配置 API Key",
-				description: "在侧边栏 -> 头像 -> API Key 中配置 API Key",
-				variant: "destructive",
-			});
-			return;
-		}
-
-		// 保存 API Key
-		await saveApiConfig({
-			coordinator: apiKeyStore.coordinatorConfig,
-			modeler: apiKeyStore.modelerConfig,
-			coder: apiKeyStore.coderConfig,
-			writer: apiKeyStore.writerConfig,
-			openalex_email: apiKeyStore.openalexEmail,
-		});
 
 		if (uploadedFiles.value.length === 0) {
 			if (!fileConfirmDialog.value) return;
@@ -165,7 +145,7 @@ const handleSubmit = async () => {
 		console.error("任务提交失败:", error);
 		toast({
 			title: "任务提交失败",
-			description: "请检查 API Key 是否正确",
+			description: error?.message || String(error),
 			variant: "destructive",
 		});
 	}
