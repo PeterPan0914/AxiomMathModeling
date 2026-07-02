@@ -29,12 +29,10 @@ from app.core.agents import (
     ReviewAgent,
     MultiReviewer,
     ResultInterpreterAgent,
-    CriticAgent,
     LiteratureAgent,
     OutlineAgent,
     ConsistencyAgent,
     ProblemAnalystAgent,
-    # Phase 2 新增
     DependencyAgent,
     ProblemTypeAgent,
     ProblemReformulationAgent,
@@ -669,7 +667,7 @@ class MathModelWorkFlow(WorkFlow):
             diagnostic_logger=diag,
         )
 
-        # 初始化 ReviewerAgent（正确性守卫，替代 CriticAgent）
+        # Initialize ReviewerAgent (correctness guard)
         reviewer_agent = ReviewerAgent(
             task_id=problem.task_id,
             model=writer_llm,

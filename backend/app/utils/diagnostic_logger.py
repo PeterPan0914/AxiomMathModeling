@@ -36,6 +36,11 @@ class DiagnosticLogger:
         with open(filepath, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
+    @staticmethod
+    def _write_json_file(filepath: str, content: str) -> None:
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(content)
+
     async def log_interaction(
         self,
         agent_name: str,
@@ -109,10 +114,12 @@ class DiagnosticLogger:
         """
         path = os.path.join(self.diag_dir, "quality.json")
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(quality_data, f, ensure_ascii=False, indent=2)
+            await asyncio.to_thread(
+                self._write_json_file, path,
+                json.dumps(quality_data, ensure_ascii=False, indent=2),
+            )
         except Exception as e:
-            logger.error(f"质量数据写入失败: {e}")
+            logger.error(f"quality data write failed: {e}")
 
     async def save_workflow_config(self, config: dict) -> None:
         """保存工作流配置信息（模型名、Reflexion 配置等）。
@@ -122,10 +129,12 @@ class DiagnosticLogger:
         """
         path = os.path.join(self.diag_dir, "config.json")
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(config, f, ensure_ascii=False, indent=2)
+            await asyncio.to_thread(
+                self._write_json_file, path,
+                json.dumps(config, ensure_ascii=False, indent=2),
+            )
         except Exception as e:
-            logger.error(f"配置信息写入失败: {e}")
+            logger.error(f"workflow config write failed: {e}")
 
     async def save_structure_report(self, report: dict) -> None:
         """保存结构控制报告到 JSON 文件。
@@ -135,7 +144,9 @@ class DiagnosticLogger:
         """
         path = os.path.join(self.diag_dir, "structure_report.json")
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(report, f, ensure_ascii=False, indent=2)
+            await asyncio.to_thread(
+                self._write_json_file, path,
+                json.dumps(report, ensure_ascii=False, indent=2),
+            )
         except Exception as e:
-            logger.error(f"结构报告写入失败: {e}")
+            logger.error(f"structure report write failed: {e}")

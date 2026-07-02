@@ -13,11 +13,6 @@ from app.core.prompts.writer import (
     CHAPTER_DEFAULT,
 )
 from app.core.prompts.reviewer import get_reviewer_prompt
-from app.core.prompts.critic import (
-    get_method_critique_prompt,
-    get_result_critique_prompt,
-    get_chapter_critique_prompt,
-)
 from app.core.prompts.literature import get_literature_research_prompt
 from app.core.prompts.outline import get_outline_prompt
 from app.core.prompts.consistency import get_consistency_check_prompt
@@ -53,9 +48,6 @@ __all__ = [
     "CHAPTER_EVALUATION",
     "CHAPTER_DEFAULT",
     "get_reviewer_prompt",
-    "get_method_critique_prompt",
-    "get_result_critique_prompt",
-    "get_chapter_critique_prompt",
     "get_literature_research_prompt",
     "get_outline_prompt",
     "get_consistency_check_prompt",

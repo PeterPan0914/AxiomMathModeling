@@ -80,8 +80,6 @@ class Settings(BaseSettings):
     REDIS_MAX_CONNECTIONS: int = 10
     CORS_ALLOW_ORIGINS: Annotated[list[str] | str, BeforeValidator(parse_cors)] = "*"
     SERVER_HOST: str = "http://localhost:8000"
-    DEEPSEEK_MODEL: Optional[str] = None
-    DEEPSEEK_BASE_URL: Optional[str] = None
     OPENALEX_EMAIL: Optional[str] = None
     OPENALEX_API_KEY: Optional[str] = None
 
@@ -125,17 +123,6 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="allow",
     )
-
-    @classmethod
-    def from_env(cls, env: str | None = None):
-        """根据环境名称加载对应配置。
-
-        Args:
-            env: 环境名称（如 dev、prod），默认从 ENV 环境变量获取。
-        """
-        env = env or os.getenv("ENV", "dev")
-        env_file = f".env.{env.lower()}"
-        return cls(_env_file=env_file, _env_file_encoding="utf-8")  # type: ignore[call-arg]
 
 
 settings = Settings()

@@ -246,8 +246,8 @@ class CoderAgent(Agent):
                                 "role": "user",
                                 "content": "代码已执行完成。如果还需要继续分析或执行更多代码，请继续；如果任务已完成，请说明结果。"
                             })
-                            continue
-                            retry_count += 1  # 占位：每个完整循环至少算一轮，避免 max_retries=None 时死循环
+                            # 计一次 retry，防止 LLM 一直说“代码已完成”陷入无限循环
+                            retry_count += 1
                         continue
                     else:
                         # 没有代码块，认为任务完成

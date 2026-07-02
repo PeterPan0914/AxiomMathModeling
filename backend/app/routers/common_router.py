@@ -65,8 +65,8 @@ async def root():
 async def config():
     return {
         "environment": settings.ENV,
-        "deepseek_model": settings.DEEPSEEK_MODEL,
-        "deepseek_base_url": settings.DEEPSEEK_BASE_URL,
+        "llm_default_model": settings.LLM_DEFAULT_MODEL,
+        "llm_default_base_url": settings.LLM_DEFAULT_BASE_URL,
         "max_chat_turns": settings.MAX_CHAT_TURNS,
         "max_retries": settings.MAX_RETRIES,
         "CORS_ALLOW_ORIGINS": settings.CORS_ALLOW_ORIGINS,
